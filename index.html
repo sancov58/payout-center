@@ -205,7 +205,7 @@ textarea.inp{width:100%;min-height:90px;resize:vertical;font-family:var(--f-num)
         <input type="date" id="cFrom"> 至 <input type="date" id="cTo">
       </span>
     </div>
-    <span class="userbox"><span class="status" id="status">載入中…</span><span id="userName"></span><button class="btn ghost" id="btnExport">匯出備份</button><button class="btn ghost" id="btnLogout">登出</button></span>
+    <span class="userbox"><span class="status" id="status">載入中…</span><span id="userName"></span><button class="btn" id="btnGmail" title="讀取 Gmail 裡的 Vest 收據與出金通知">⟳ 從 Gmail 同步 Vest</button><button class="btn ghost" id="btnExport">匯出備份</button><button class="btn ghost" id="btnLogout">登出</button></span>
   </div>
 
   <div class="kpis">
@@ -436,9 +436,85 @@ const ERRS = {
   'auth/network-request-failed':'網路連線失敗，請確認網路後再試。'
 };
 function showLoginErr(e){ const el=$('loginErr'); el.hidden=false; el.textContent = ERRS[e.code] || ('登入失敗：'+(e.code||e.message)); }
+/* ---------- Gmail 同步 Vest ---------- */
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const MON = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+const twDate = ms => { const d = new Date(ms + 8*3600e3); return ymd(d.getUTCFullYear(), d.getUTCMonth()+1, d.getUTCDate()); };
+function b64(data){ const bin = atob(data.replace(/-/g,'+').replace(/_/g,'/')); return new TextDecoder().decode(Uint8Array.from(bin, c=>c.charCodeAt(0))); }
+function bodyText(part){
+  if (!part) return '';
+  if (part.mimeType==='text/plain' && part.body && part.body.data) return b64(part.body.data);
+  for (const p of part.parts||[]) { const t = bodyText(p); if (t) return t; }
+  if (part.mimeType==='text/html' && part.body && part.body.data) return b64(part.body.data).replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ');
+  return '';
+}
+function specOf(prod){
+  if (/Instant/i.test(prod)) return {size:'500 Instant', spec:'Instant 500'};
+  const parts = prod.split('|').map(x=>x.trim());
+  const goal = (parts.find(x=>/Goal/i.test(x))||'').replace(/\s*Goal/i,'');
+  const dlRaw = parts.find(x=>/Daily Loss/i.test(x))||'';
+  const dl = /No Daily/i.test(dlRaw) ? '無日損' : dlRaw.replace(/\s*Daily Loss/i,'日損');
+  const sp = parts.find(x=>/^\d+\/\d+$/.test(x))||'';
+  return {size:'5K', spec:`Eval ${goal}目標 · ${dl} · ${sp}`};
+}
+async function gmailToken(){
+  const prov = new GoogleAuthProvider(); prov.addScope(GMAIL_SCOPE); prov.setCustomParameters({login_hint: auth.currentUser?.email||''});
+  const res = await signInWithPopup(auth, prov);
+  const cred = GoogleAuthProvider.credentialFromResult(res);
+  if (!cred || !cred.accessToken) throw new Error('沒有取得 Gmail 授權');
+  return cred.accessToken;
+}
+async function gm(token, path){
+  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/'+path, {headers:{Authorization:'Bearer '+token}});
+  if (!r.ok) { const t = await r.text(); throw new Error('Gmail '+r.status+'：'+(/has not been used|disabled/i.test(t)?'Gmail API 尚未在 Firebase 專案啟用':t.slice(0,120))); }
+  return r.json();
+}
+async function syncVestFromGmail(){
+  const btn = $('btnGmail'); if (btn.disabled) return;
+  btn.disabled = true; const label = btn.textContent; btn.textContent = '同步中…';
+  try {
+    const token = await gmailToken();
+    const q = encodeURIComponent('from:noreply@spark.vestmarkets.com (subject:"Vest receipt" OR subject:"Payout Completed")');
+    let ids = [], pageToken = '';
+    do { const j = await gm(token, `messages?q=${q}&includeSpamTrash=true&maxResults=500${pageToken?'&pageToken='+pageToken:''}`); ids.push(...(j.messages||[]).map(m=>m.id)); pageToken = j.nextPageToken||''; } while (pageToken);
+    const msgs = [];
+    for (let i=0;i<ids.length;i+=10) msgs.push(...await Promise.all(ids.slice(i,i+10).map(id => gm(token, 'messages/'+id+'?format=full'))));
+    const receipts = [], payouts = [];
+    for (const m of msgs) {
+      const subj = (m.payload.headers.find(h=>h.name.toLowerCase()==='subject')||{}).value||'';
+      const t = bodyText(m.payload);
+      if (/Vest receipt/i.test(subj)) {
+        const rc = (t.match(/Receipt (VST-\d+-\d+)/)||[])[1]; const price = +((t.match(/Price per account:\s*\$([\d.,]+)/)||[])[1]||'0').replace(/,/g,'');
+        const paid = +((t.match(/Confirmed purchase amount \(USD\):\s*\$([\d.,]+)/)||[])[1]||'0').replace(/,/g,'');
+        const qty = +((t.match(/Number of accounts:\s*(\d+)/)||[])[1]||1);
+        const prod = ((t.match(/\n(Vest Capital[^\n]+)/)||[])[1]||'').trim();
+        if (rc && paid>0) receipts.push({ms:+m.internalDate, rc, price, unit: Math.round(paid/qty*100)/100, qty, prod});
+      } else if (/Payout Completed/i.test(subj)) {
+        const amt = +((t.match(/Amount\s*\|?\s*([\d.,]+)\s*USDC/)||t.match(/([\d.,]+)\s*USDC transferred/)||[])[1]||'0').replace(/,/g,'');
+        if (amt>0) payouts.push({ms:+m.internalDate, id:m.id, amt});
+      }
+    }
+    receipts.sort((a,b)=>a.ms-b.ms);
+    const out = []; let n = 0;
+    for (const r of receipts) for (let k=0;k<r.qty;k++) { n++; const sp = specOf(r.prod);
+      out.push({id:'vest-acc-'+String(n).padStart(2,'0'), date:twDate(r.ms), firm:'Vest Markets', size:sp.size, type:'cost', cat:'購買帳號', amount:r.unit, split:null, note:`Account ${String(n).padStart(2,'0')} · ${sp.spec} · 原價 $${r.price} · 收據 ${r.rc}`}); }
+    const existingPays = [...recs.values()].filter(r => firmGroup(r.firm)==='Vest' && r.type==='payout');
+    for (const p of payouts) { const d = twDate(p.ms);
+      if (existingPays.some(e => e.date===d && Math.abs(netOf(e)-p.amt) < 0.05)) continue;
+      out.push({id:'vest-pay-mail-'+p.id, date:d, firm:'Vest Markets', size:'', type:'payout', cat:'出金', amount:p.amt, split:100, note:`Gmail 出金通知 · 實收 ${p.amt} USDC`}); }
+    log.innerHTML=''; $('importModal').hidden=false;
+    logLine(`Gmail：找到 ${receipts.length} 封收據、${payouts.length} 封出金通知`);
+    await saveParsed('Gmail 同步 Vest', {recs:out, kinds:{backup:out.length}, skipped:0, failed:[], dupInFile:0});
+  } catch(e) {
+    toast('同步失敗：'+(e.code||e.message));
+    if (e.code!=='auth/popup-closed-by-user') { log.innerHTML=''; $('importModal').hidden=false; logLine('Gmail 同步失敗：'+(e.code||e.message), 'bad'); }
+  } finally { btn.disabled = false; btn.textContent = label; }
+}
+
 function initStore(){
   $('btnLogin').onclick = () => { $('loginErr').hidden=true; signInWithPopup(auth, new GoogleAuthProvider()).catch(showLoginErr); };
   $('btnLogout').onclick = () => signOut(auth);
+  $('btnGmail').onclick = () => syncVestFromGmail();
   $('btnExport').onclick = () => {
     const data = JSON.stringify([...recs.values()], null, 1);
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data],{type:'application/json'}));
