@@ -477,8 +477,8 @@ const inTab = r => st.firmTab==='all' || firmGroup(r.firm)===st.firmTab;
 function inPeriod(){ const [a,b] = periodRange(); return [...recs.values()].filter(r => r.date>=a && r.date<=b && inTab(r)); }
 function drawFirmTabs(){
   const counts = {}; [...recs.values()].forEach(r => { const g=firmGroup(r.firm); counts[g]=(counts[g]||0)+1; });
-  const order = ['Lucid','Tradeify','Vest']; const gs = Object.keys(counts).sort((a,b)=>(order.indexOf(a)+1||99)-(order.indexOf(b)+1||99));
-  if (st.firmTab!=='all' && !counts[st.firmTab]) st.firmTab='all';
+  const order = ['Lucid','Tradeify','Vest']; order.forEach(g=>counts[g]=counts[g]||0); const gs = Object.keys(counts).sort((a,b)=>(order.indexOf(a)+1||99)-(order.indexOf(b)+1||99));
+  if (st.firmTab!=='all' && !(st.firmTab in counts)) st.firmTab='all';
   const tabs = [['all','全部合併',recs.size], ...gs.map(g=>[g,g,counts[g]])];
   $('firmTabs').innerHTML = tabs.map(([k,l,c])=>`<button role="tab" data-f="${esc(k)}" class="${st.firmTab===k?'on':''}" aria-selected="${st.firmTab===k}">${esc(l)}<span class="cnt">${c}</span></button>`).join('');
 }
