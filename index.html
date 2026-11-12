@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>出金中心</title>
+<meta name="theme-color" content="#0e131a">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="出金中心">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: 交易終端 — 操作列、KPI、圖表+月曆、明細。深藍墨色底、高對比文字、琥珀金主色 */
+:root{
+  --bg:#0e131a; --panel:#161d27; --panel2:#1f2834; --line:#2a3544; --line2:#3a4758;
+  --fg:#f3f6fa; --muted:#c3cdd9; --faint:#97a4b4;
+  --gold:#f5b83d; --gold-dim:#8a6a26; --gold-ink:#1b1404; --gold-soft:#3a2f17;
+  --green:#3ddc91; --green-bg:#123a2a; --green-line:#2a7a55;
+  --red:#ff7b72; --red-bg:#3d1c1d; --red-line:#7a3532;
+  --violet:#c9a7ff; --violet-bg:#2c2440;
+  --f-ui:"Inter","Noto Sans TC",system-ui,sans-serif; --f-num:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{background:var(--bg)}
+body{margin:0;padding-top:max(22px,env(safe-area-inset-top,0px))!important;background:var(--bg);color:var(--fg);font-family:var(--f-ui);font-size:15px;line-height:1.45;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:22px 44px}
+.wrap{max-width:1500px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+h1{font-size:24px;margin:0;font-weight:700;letter-spacing:.02em;display:flex;align-items:center;gap:10px}
+h1::before{content:"";width:10px;height:24px;border-radius:3px;background:var(--gold)}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:1px solid var(--line2);background:var(--panel2);border-radius:9px;padding:9px 14px;font-weight:600;font-size:14px;color:var(--fg)}
+.btn:hover{border-color:var(--gold)}
+.btn.gold{background:var(--gold);border-color:var(--gold);color:var(--gold-ink)}
+.btn.gold:hover{filter:brightness(1.08)}
+.btn.danger{color:var(--red);border-color:var(--red-line);background:transparent}
+.btn.ghost{background:transparent}
+.btn:disabled{opacity:.4;cursor:default}
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px}
+.chip{border:0;background:transparent;color:var(--muted);padding:6px 13px;border-radius:7px;font-size:14px;font-weight:500}
+.chip.on{background:var(--gold);color:var(--gold-ink);font-weight:700}
+.chip:hover:not(.on){color:var(--fg);background:var(--panel2)}
+.custom{display:flex;gap:6px;align-items:center;color:var(--muted);padding:0 6px}
+.custom input{background:var(--panel2);border:1px solid var(--line2);border-radius:6px;padding:5px 7px;color:var(--fg)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0;border-top:3px solid var(--line2)}
+.kpi.k-gold{border-top-color:var(--gold)} .kpi.k-green{border-top-color:var(--green)} .kpi.k-red{border-top-color:var(--red)}
+.kpi .lab{color:var(--muted);font-size:14px;font-weight:600}
+.kpi .val{font-size:26px;font-weight:600;letter-spacing:-.01em}
+.kpi .sub{color:var(--faint);font-size:13px}
+.pos{color:var(--green)} .neg{color:var(--red)} .gold-t{color:var(--gold)}
+.grid2{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:14px}
+@media (max-width:1000px){.grid2{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;min-width:0}
+.ph{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.ph h2{font-size:17px;margin:0;font-weight:700}
+.seg{display:flex;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:3px}
+.seg button{border:0;background:transparent;color:var(--muted);padding:5px 13px;border-radius:6px;font-size:13.5px;font-weight:600}
+.seg button.on{background:var(--gold);color:var(--gold-ink)}
+#chart{width:100%;min-height:300px}
+#chart svg{display:block}
+.legend{display:flex;gap:16px;justify-content:flex-end;color:var(--muted);font-size:13px;margin-top:6px;flex-wrap:wrap}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.cal-h{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.cal-h .mnav{display:flex;gap:6px}
+.cal-h .mnav button{border:1px solid var(--line2);background:var(--panel2);border-radius:7px;width:32px;height:30px;font-size:16px;color:var(--fg)}
+.pill{border-radius:999px;padding:3px 10px;font-size:13px;font-weight:700;white-space:nowrap}
+.pill.p{background:var(--green-bg);color:var(--green);box-shadow:inset 0 0 0 1px var(--green-line)}
+.pill.c{background:var(--red-bg);color:var(--red);box-shadow:inset 0 0 0 1px var(--red-line)}
+.pill.o{background:var(--violet-bg);color:var(--violet)}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.dow{text-align:center;color:var(--muted);font-size:13px;font-weight:600;padding-bottom:2px}
+.day{background:var(--panel2);border-radius:8px;min-height:58px;padding:6px 3px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:14px}
+.day.empty{background:transparent}
+.day.has-p{background:var(--green-bg);box-shadow:inset 0 0 0 1px var(--green-line)}
+.day.today{box-shadow:inset 0 0 0 2px var(--gold)}
+.day .d{font-weight:700}
+.day .amt{font-family:var(--f-num);font-size:12px;font-weight:600;line-height:1.25}
+.cal-legend{display:flex;gap:14px;color:var(--muted);font-size:13px;margin-top:12px}
+.cal-legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.filters .l{display:flex;gap:8px;flex-wrap:wrap}
+select,.inp{background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;min-width:0;color:var(--fg);font-size:14px}
+.tbl-wrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+table{width:100%;border-collapse:collapse;min-width:900px}
+th,td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--muted);font-weight:600;font-size:13.5px;background:var(--panel2)}
+td{font-size:14.5px}
+td.r,th.r{text-align:right}
+td.note{color:var(--muted);font-size:13.5px;white-space:normal;min-width:180px}
+tbody tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+tr:hover td{background:var(--panel2)}
+.sz{display:none}
+.icon-btn{border:1px solid transparent;background:transparent;color:var(--muted);padding:5px 8px;border-radius:6px;font-size:15px}
+.icon-btn:hover{color:var(--gold);border-color:var(--line2)}
+.pager{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:14px}
+.pager .r{display:flex;gap:6px;align-items:center}
+.empty-state{padding:40px 16px;text-align:center;color:var(--muted);font-size:15px}
+.status{font-size:13.5px;color:var(--muted)}
+.status.warn{color:var(--gold)}
+.scrim{position:fixed;inset:0;background:rgba(4,7,12,.72);display:flex;align-items:flex-start;justify-content:center;padding:max(40px,env(safe-area-inset-top,0px)) 16px 24px;z-index:50;overflow-y:auto}
+.modal{background:var(--panel);border:1px solid var(--line2);border-radius:14px;width:min(580px,100%);padding:20px;display:flex;flex-direction:column;gap:16px}
+.modal h3{margin:0;font-size:18px}
+.form{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:13.5px;font-weight:600}
+.form label.full{grid-column:1/-1}
+.form .inp,.form select{font-size:15px;font-weight:400}
+@media (max-width:480px){.form{grid-template-columns:1fr}}
+.drop{border:2px dashed var(--line2);border-radius:12px;padding:22px 14px;text-align:center;color:var(--muted);display:flex;flex-direction:column;gap:10px;align-items:center}
+.drop.over{border-color:var(--gold);color:var(--fg)}
+textarea.inp{width:100%;min-height:90px;resize:vertical;font-family:var(--f-num);font-size:13px}
+.log{background:var(--panel2);border-radius:9px;padding:12px 14px;font-size:13.5px;display:flex;flex-direction:column;gap:5px;max-height:220px;overflow:auto}
+.log .ok{color:var(--green)} .log .bad{color:var(--red)}
+.row-end{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center}
+.hint{color:var(--faint);font-size:13px;line-height:1.55}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--gold);color:var(--gold-ink);padding:10px 16px;border-radius:9px;font-weight:700;z-index:60}
+@media (max-width:640px){
+  body{font-size:15px}
+  h1{font-size:22px}
+  .chip{padding:6px 9px;font-size:13.5px}
+  .chips{gap:2px}
+  .kpis{grid-template-columns:1fr 1fr;gap:10px}
+  .kpis .kpi:last-child{grid-column:1/-1}
+  .kpi{padding:12px 13px}
+  .kpi .val{font-size:20px}
+  .kpi .lab{font-size:13px}
+  .kpi .sub{font-size:12px}
+  .day{min-height:52px}
+  .day .amt{font-size:11px}
+  .tbl-wrap{background:transparent;border:0;overflow:visible}
+  table{min-width:0}
+  thead{display:none}
+  tbody{display:flex;flex-direction:column;gap:10px}
+  tbody tr{display:grid;grid-template-columns:1fr auto;gap:5px 10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  tbody tr:nth-child(even) td,tr:hover td{background:transparent}
+  tbody td{border:0;padding:0;white-space:normal}
+  tbody td.c-date{grid-column:1;grid-row:1;font-size:15px;font-weight:600}
+  tbody td.c-type{grid-column:2;grid-row:1;text-align:right}
+  tbody td.c-firm{grid-column:1;grid-row:2;color:var(--muted);font-size:14px}
+  tbody td.c-amt{grid-column:2;grid-row:2;font-size:17px;font-weight:700}
+  tbody td.c-size,tbody td.c-split{display:none}
+  tbody td.c-net{grid-column:1/-1;grid-row:3;text-align:left;font-size:14px}
+  tbody td.c-net.nil{display:none}
+  tbody td.note{grid-column:1;grid-row:4;min-width:0;font-size:13px}
+  tbody td.c-op{grid-column:2;grid-row:4;text-align:right}
+  .sz{display:inline!important}
+}
+/* login */
+.login{position:fixed;inset:0;z-index:80;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px}
+.login .box{width:min(380px,100%);background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px 24px;display:flex;flex-direction:column;gap:16px;text-align:center}
+.login h2{margin:0;font-size:24px}
+.login p{margin:0;color:var(--muted);font-size:14px}
+.login .err{color:var(--red);font-size:13.5px;white-space:pre-line}
+.userbox{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:13px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="login" id="login">
+  <div class="box">
+    <h2>出金中心</h2>
+    <p>Prop Firm 出金與成本統計</p>
+    <button class="btn gold" id="btnLogin" style="padding:12px">使用 Google 帳號登入</button>
+    <div class="err" id="loginErr" hidden></div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="top">
+    <h1>出金中心</h1>
+    <div class="actions">
+      <button class="btn" id="btnImport">⇪ 匯入記錄</button>
+      <button class="btn gold" id="btnAddCost">＋ 新增成本</button>
+      <button class="btn gold" id="btnAddPayout">＋ 新增出金</button>
+    </div>
+  </div>
+
+  <div class="top">
+    <div class="chips" id="periods">
+      <button class="chip" data-p="7">7天</button>
+      <button class="chip" data-p="30">30天</button>
+      <button class="chip" data-p="90">90天</button>
+      <button class="chip" data-p="ytd">YTD</button>
+      <button class="chip on" data-p="all">全部</button>
+      <button class="chip" data-p="custom">自訂</button>
+      <span class="custom" id="customRange" hidden>
+        <input type="date" id="cFrom"> 至 <input type="date" id="cTo">
+      </span>
+    </div>
+    <span class="userbox"><span class="status" id="status">載入中…</span><span id="userName"></span><button class="btn ghost" id="btnExport">匯出備份</button><button class="btn ghost" id="btnLogout">登出</button></span>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi k-gold"><span class="lab">總出金</span><span class="val num gold-t" id="kGross">$0.00</span><span class="sub" id="kGrossSub">0 筆出金</span></div>
+    <div class="kpi k-green"><span class="lab">實際到手</span><span class="val num pos" id="kNet">$0.00</span><span class="sub">扣除分成後</span></div>
+    <div class="kpi k-red"><span class="lab">總成本</span><span class="val num neg" id="kCost">$0.00</span><span class="sub" id="kCostSub">0 筆成本</span></div>
+    <div class="kpi" id="kProfitCard"><span class="lab">淨利潤</span><span class="val num" id="kProfit">$0.00</span><span class="sub" id="kRoi">ROI —</span></div>
+    <div class="kpi"><span class="lab">總記錄數</span><span class="val num" id="kCount">0</span><span class="sub" id="kAcc">—</span></div>
+  </div>
+
+  <div class="grid2">
+    <div class="panel">
+      <div class="ph"><h2>績效表現</h2>
+        <div class="seg" id="chartMode"><button class="on" data-m="month">月份</button><button data-m="firm">公司</button></div>
+      </div>
+      <div id="chart"></div>
+      <div class="legend"><span><i style="background:var(--gold)"></i>實際到手</span><span><i style="background:var(--gold-dim)"></i>分成差額</span><span><i style="background:var(--red)"></i>成本</span></div>
+    </div>
+    <div class="panel">
+      <div class="cal-h">
+        <h2 style="font-size:13.5px;margin:0" id="calTitle">—</h2>
+        <span class="pill p num" id="calNet">本月盈虧 $0</span>
+        <div class="mnav"><button id="calPrev" aria-label="上個月">‹</button><button id="calNext" aria-label="下個月">›</button></div>
+      </div>
+      <div class="cal" id="cal"></div>
+      <div class="cal-legend"><span><i style="background:var(--red)"></i>購買帳號 / 成本</span><span><i style="background:var(--green)"></i>出金</span></div>
+    </div>
+  </div>
+
+  <div class="filters">
+    <div class="l">
+      <select id="fType" aria-label="記錄類型"><option value="all">全部記錄</option><option value="payout">出金</option><option value="cost">成本</option></select>
+      <select id="fFirm" aria-label="公司"><option value="all">全部公司</option></select>
+    </div>
+    <button class="btn ghost" id="btnClear">清空全部資料</button>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>日期</th><th>Prop Firm 名稱</th><th>帳號類型</th><th>類型</th><th class="r">金額</th><th class="r">出金分成%</th><th class="r">實際到手</th><th>備註</th><th class="r">操作</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="empty-state" id="emptyState" hidden>還沒有記錄。按「匯入記錄」選 Lucid / Tradeify 的 Excel，或直接新增一筆。</div>
+  </div>
+  <div class="pager">
+    <span id="pgInfo">—</span>
+    <div class="r">每頁顯示
+      <select id="pgSize"><option>20</option><option>50</option><option>100</option></select>
+      <button class="btn ghost" id="pgPrev">‹ 上一頁</button><span id="pgNum">1 / 1</span><button class="btn ghost" id="pgNext">下一頁 ›</button>
+    </div>
+  </div>
+</div>
+
+<!-- 匯入 -->
+<div class="scrim" id="importModal" hidden>
+  <div class="modal" role="dialog" aria-labelledby="impTitle">
+    <h3 id="impTitle">匯入記錄</h3>
+    <div class="drop" id="drop">
+      <div>把 Excel 拖進來，或</div>
+      <label class="btn gold" style="display:inline-block">選擇檔案<input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.json" multiple hidden></label>
+      <div class="hint">可一次選多個檔。自動辨識工作表：Lucid Order History、Lucid Payout History、Tradeify Orders、自訂 PayoutRecords，以及「匯出備份」產生的 .json 檔。重複匯入不會重複計算。</div>
+    </div>
+    <div class="form">
+      <label>出金預設分成 %<input class="inp num" id="defSplit" type="number" min="0" max="100" value="90"></label>
+      <label>貼上內容的格式
+        <select id="pasteKind"><option value="">自動判斷（含表頭）</option><option value="lucidOrders">Lucid 購買紀錄 Order History</option><option value="lucidPayouts">Lucid 出金紀錄 Payout History</option><option value="tradeifyOrders">Tradeify 購買紀錄</option></select>
+      </label>
+      <label class="full">或直接貼上從網頁複製的表格
+        <textarea class="inp" id="pasteBox" placeholder="#11675488	Oct 24, 2026	LucidFlex 50K Rithmic	$14.00	Credit Card	COMPLETED"></textarea>
+      </label>
+    </div>
+    <div class="log" id="impLog" hidden></div>
+    <div class="row-end">
+      <span class="hint">已存在的記錄會保留你手動改過的分成%與備註。</span>
+      <div class="actions"><button class="btn" id="impClose">關閉</button><button class="btn gold" id="impPaste">匯入貼上內容</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- 編輯 -->
+<div class="scrim" id="editModal" hidden>
+  <div class="modal" role="dialog" aria-labelledby="edTitle">
+    <h3 id="edTitle">新增出金</h3>
+    <div class="form">
+      <label>日期<input class="inp" type="date" id="eDate"></label>
+      <label>類型<select id="eType"><option value="payout">出金</option><option value="購買帳號">購買帳號</option><option value="其他成本">其他成本</option></select></label>
+      <label>Prop Firm 名稱<input class="inp" id="eFirm" list="firmList" placeholder="Lucid Trading"></label>
+      <label>帳號類型<input class="inp" id="eSize" placeholder="50k"></label>
+      <label>金額 (USD)<input class="inp num" id="eAmt" type="number" step="0.01" min="0"></label>
+      <label id="eSplitWrap">出金分成 %<input class="inp num" id="eSplit" type="number" min="0" max="100" value="90"></label>
+      <label class="full">備註<input class="inp" id="eNote"></label>
+    </div>
+    <datalist id="firmList"></datalist>
+    <div class="row-end">
+      <button class="btn danger" id="eDel">刪除</button>
+      <div class="actions"><button class="btn" id="eCancel">取消</button><button class="btn gold" id="eSave">儲存</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { initializeFirestore, persistentLocalCache, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+const firebaseConfig = {
+  apiKey: "AIzaSyB2oHiKQVMU2rXoYI19LdgO8TTSw89bQSs",
+  authDomain: "trade-sync-e41ce.firebaseapp.com",
+  projectId: "trade-sync-e41ce",
+  storageBucket: "trade-sync-e41ce.appspot.com",
+  messagingSenderId: "819101665510",
+  appId: "1:819101665510:web:e9f69f8239af1ec8b8d327"
+};
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+let fdb; try { fdb = initializeFirestore(fbApp, {localCache: persistentLocalCache()}); } catch(e) { fdb = initializeFirestore(fbApp, {}); }
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+const pad = n => String(n).padStart(2,'0');
+const ymd = (y,m,d) => `${y}-${pad(m)}-${pad(d)}`;
+const todayISO = () => { const t = new Date(); return ymd(t.getFullYear(), t.getMonth()+1, t.getDate()); };
+const fmt = (v, sign=false) => { const s = Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:6}); return (v<0?'-':(sign&&v>0?'+':''))+'$'+s; };
+const fmtK = v => { const a=Math.abs(v); const s = a>=1000 ? (a/1000).toFixed(a>=10000?0:1).replace(/\.0$/,'')+'k' : a.toFixed(0); return (v<0?'-':'+')+'$'+s; };
+const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const safeId = s => String(s).replace(/[^A-Za-z0-9_\-~:@+]/g,'_').slice(0,190);
+const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+
+/* ---------- 解析 ---------- */
+function toISO(v){
+  if (v==null || v==='') return null;
+  if (typeof v === 'number') { if (typeof XLSX==='undefined') return null; const d = XLSX.SSF.parse_date_code(v); return d ? ymd(d.y,d.m,d.d) : null; }
+  if (v instanceof Date) return ymd(v.getFullYear(), v.getMonth()+1, v.getDate());
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/); if (m) return ymd(+m[1],+m[2],+m[3]);
+  m = s.match(/^([A-Za-z]{3,})\.?\s+(\d{1,2}),?\s+(\d{4})/);
+  if (m) { const i = MONTHS.indexOf(m[1].slice(0,3).toLowerCase()); if (i>=0) return ymd(+m[3], i+1, +m[2]); }
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if (m) return ymd(+m[3],+m[1],+m[2]);
+  return null;
+}
+const num = v => typeof v==='number' ? v : (parseFloat(String(v??'').replace(/[^0-9.\-]/g,'')) || 0);
+const norm = s => String(s??'').trim().toLowerCase().replace(/\s+/g,' ');
+const sizeFrom = s => { const m = String(s??'').match(/(\d{2,3})\s*k\b/i); return m ? (+m[1])+'k' : ''; };
+const sizeFromAcct = s => { const m = String(s??'').match(/^[A-Z]+(\d{3})-/i); return m ? (+m[1])+'k' : ''; };
+
+const HEADERS = {
+  lucidOrders:['Order #','Date','Products','Total','Payment','Status'],
+  lucidPayouts:['Account ID','Request Date','Approval Date','Amount','Status'],
+  tradeifyOrders:['Order Status','Date','Paid Amount','Plan','Payment Method','Payment Status','Transaction Id','Order Id','Broker','Trading Account','Card Number'],
+  records:['日期','Prop Firm 名稱','帳號類型','類型','金額','出金分成%','備註']
+};
+const KIND_NAME = {backup:'備份檔', lucidOrders:'Lucid 購買紀錄', lucidPayouts:'Lucid 出金紀錄', tradeifyOrders:'Tradeify 購買紀錄', records:'自訂出金表'};
+function detectKind(row){
+  const h = row.map(norm);
+  if (h.includes('order #') && h.includes('products')) return 'lucidOrders';
+  if (h.includes('account id') && h.includes('amount')) return 'lucidPayouts';
+  if (h.includes('order status') && h.includes('paid amount')) return 'tradeifyOrders';
+  if (h.includes('日期') && h.includes('金額')) return 'records';
+  return null;
+}
+const payoutKey = (firm, date, amt) => `pay-${slug(firm)}-${date}-${Math.round(amt*100)}`;
+
+function parseAoa(aoa, forced, defSplit){
+  const out = []; const counts = {}; const kinds = {}; const failed = []; const seen = new Set();
+  let kind = null, col = null, skipped = 0, dupInFile = 0;
+  const setHeader = (k, row) => { kind = k; col = {}; row.forEach((h,i)=>{ const n=norm(h); if(n && !(n in col)) col[n]=i; }); };
+  const uniq = key => { counts[key]=(counts[key]||0)+1; return counts[key]>1 ? key+'-'+counts[key] : key; };
+  for (const raw of aoa) {
+    const row = (raw||[]).map(c => typeof c==='string' ? c.trim() : c);
+    if (!row.some(c => c!=='' && c!=null)) continue;
+    const k = detectKind(row);
+    if (k) { setHeader(k,row); continue; }
+    if (!kind) { if (forced) setHeader(forced, HEADERS[forced]); else { skipped++; continue; } }
+    const g = name => row[col[norm(name)]];
+    let rec = null;
+    if (kind==='lucidOrders') {
+      const st = norm(g('Status')), amt = num(g('Total')), date = toISO(g('Date')), ord = String(g('Order #')||'').replace(/[^0-9A-Za-z]/g,'');
+      if (ord && st && st!=='completed') { failed.push('#'+ord+' '+st.toUpperCase()); continue; }
+      if (!date || !ord || amt<=0) { skipped++; continue; }
+      rec = {id:'lucid-o-'+ord, date, firm:'Lucid Trading', size:sizeFrom(g('Products')), type:'cost', cat:'購買帳號', amount:amt, split:null, note:`#${ord} · ${g('Products')||''}`};
+    } else if (kind==='lucidPayouts') {
+      const st = norm(g('Status')), amt = num(g('Amount')), date = toISO(g('Approval Date')) || toISO(g('Request Date')), acct = String(g('Account ID')||'');
+      if (st && !/paid|approved|complete/.test(st)) { failed.push(`${acct} ${fmt(amt)} ${st.toUpperCase()}`); continue; }
+      if (!date || amt<=0) { skipped++; continue; }
+      rec = {id:uniq(payoutKey('Lucid Trading',date,amt)), date, firm:'Lucid Trading', size:sizeFromAcct(acct), type:'payout', cat:'出金', amount:amt, split:defSplit, note:acct};
+    } else if (kind==='tradeifyOrders') {
+      const st = norm(g('Order Status')), ps = norm(g('Payment Status')), amt = num(g('Paid Amount')), date = toISO(g('Date')), ord = String(g('Order Id')||'').replace(/[^0-9A-Za-z]/g,'');
+      if (ord && (st==='failed' || ps==='failed')) { failed.push('#'+ord+' FAILED'); continue; }
+      if (!date || !ord || amt<=0) { skipped++; continue; }
+      const acct = g('Trading Account');
+      rec = {id:'tdfy-o-'+ord, date, firm:'Tradeify', size:sizeFrom(g('Plan')), type:'cost', cat:'購買帳號', amount:amt, split:null, note:`#${ord} · ${g('Plan')||''}${acct && acct!=='---' ? ' · '+acct : ''}`};
+    } else if (kind==='records') {
+      const date = toISO(g('日期')), amt = num(g('金額')), firm = String(g('Prop Firm 名稱')||'').trim() || '未指定', t = String(g('類型')||'').trim();
+      if (!date || amt<=0) { skipped++; continue; }
+      const isPay = t.includes('出金');
+      const sp = g('出金分成%'); const split = sp===''||sp==null ? defSplit : num(sp);
+      rec = isPay
+        ? {id:uniq(payoutKey(firm,date,amt)), date, firm, size:String(g('帳號類型')||''), type:'payout', cat:'出金', amount:amt, split, note:String(g('備註')||'')}
+        : {id:uniq(`cost-${slug(firm)}-${date}-${Math.round(amt*100)}`), date, firm, size:String(g('帳號類型')||''), type:'cost', cat:t||'其他成本', amount:amt, split:null, note:String(g('備註')||'')};
+    }
+    if (rec) {
+      rec.id = safeId(rec.id);
+      if (seen.has(rec.id)) { dupInFile++; continue; }   // 同一份資料裡重複的單號
+      seen.add(rec.id); out.push(rec); kinds[kind]=(kinds[kind]||0)+1;
+    }
+  }
+  return {recs:out, kinds, skipped, failed, dupInFile};
+}
+
+/* ---------- 儲存層：Firebase Firestore ---------- */
+const recs = new Map();
+let uid = null, unsub = null;
+const col = () => collection(fdb, 'payoutCenter', uid, 'records');
+async function put(rec){
+  if (!uid) throw new Error('尚未登入');
+  const clean = {date:rec.date, firm:rec.firm, size:rec.size||'', type:rec.type, cat:rec.cat||'', amount:+rec.amount, split:rec.split==null?null:+rec.split, note:rec.note||''};
+  await setDoc(doc(col(), rec.id), clean); recs.set(rec.id,{id:rec.id,...clean});
+}
+async function del(id){ if (!uid) throw new Error('尚未登入'); await deleteDoc(doc(col(), id)); recs.delete(id); }
+function setStatus(t, warn){ const s=$('status'); s.textContent=t; s.classList.toggle('warn',!!warn); }
+const ERRS = {
+  'auth/unauthorized-domain':'這個網址還沒加進 Firebase 授權網域。\nFirebase 後台 → Authentication → Settings → Authorized domains → 加入目前網址的網域。',
+  'auth/operation-not-allowed':'Firebase 還沒開啟 Google 登入。\nFirebase 後台 → Authentication → Sign-in method → 啟用 Google。',
+  'auth/popup-blocked':'登入視窗被瀏覽器擋下，請允許彈出視窗後再按一次。',
+  'auth/popup-closed-by-user':'登入視窗被關閉了，請再按一次。',
+  'auth/network-request-failed':'網路連線失敗，請確認網路後再試。'
+};
+function showLoginErr(e){ const el=$('loginErr'); el.hidden=false; el.textContent = ERRS[e.code] || ('登入失敗：'+(e.code||e.message)); }
+function initStore(){
+  $('btnLogin').onclick = () => { $('loginErr').hidden=true; signInWithPopup(auth, new GoogleAuthProvider()).catch(showLoginErr); };
+  $('btnLogout').onclick = () => signOut(auth);
+  $('btnExport').onclick = () => {
+    const data = JSON.stringify([...recs.values()], null, 1);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([data],{type:'application/json'}));
+    a.download = `出金中心備份-${todayISO()}.json`; document.body.appendChild(a); a.click(); a.remove();
+    toast(`已匯出 ${recs.size} 筆`);
+  };
+  onAuthStateChanged(auth, u => {
+    if (unsub) { unsub(); unsub = null; }
+    recs.clear();
+    if (!u) { uid=null; $('login').hidden=false; render(); return; }
+    uid = u.uid; $('login').hidden = true; $('userName').textContent = u.email || '';
+    setStatus('同步中…');
+    unsub = onSnapshot(col(), {includeMetadataChanges:true}, snap => {
+      recs.clear(); snap.forEach(d => recs.set(d.id, {id:d.id, ...d.data()}));
+      setStatus(snap.metadata.fromCache ? `離線快取 · ${recs.size} 筆` : `已同步 · ${recs.size} 筆`, snap.metadata.fromCache);
+      render();
+    }, err => setStatus(err.code==='permission-denied' ? '沒有讀取權限：請確認 Firestore 規則已發布' : '讀取失敗：'+err.code, true));
+  });
+}
+
+/* ---------- 篩選與計算 ---------- */
+const st = { period:'all', from:'', to:'', chartMode:'month', fType:'all', fFirm:'all', page:1, size:20, calY:null, calM:null };
+const netOf = r => r.type==='payout' ? r.amount*((r.split==null?100:r.split)/100) : 0;
+function periodRange(){
+  const t = new Date(); const T = todayISO();
+  const back = n => { const d = new Date(t); d.setDate(d.getDate()-(n-1)); return ymd(d.getFullYear(), d.getMonth()+1, d.getDate()); };
+  switch (st.period) {
+    case '7': return [back(7),T]; case '30': return [back(30),T]; case '90': return [back(90),T];
+    case 'ytd': return [`${t.getFullYear()}-01-01`,T];
+    case 'custom': return [st.from||'0000-00-00', st.to||'9999-99-99'];
+    default: return ['0000-00-00','9999-99-99'];
+  }
+}
+function inPeriod(){ const [a,b] = periodRange(); return [...recs.values()].filter(r => r.date>=a && r.date<=b); }
+
+/* ---------- 繪製 ---------- */
+function render(){
+  const base = inPeriod();
+  // KPI
+  let gross=0, net=0, cost=0, np=0, nc=0;
+  base.forEach(r => { if (r.type==='payout'){ gross+=r.amount; net+=netOf(r); np++; } else { cost+=r.amount; nc++; } });
+  const profit = net - cost;
+  $('kGross').textContent = fmt(gross); $('kGrossSub').textContent = `${np} 筆出金`;
+  $('kNet').textContent = fmt(net);
+  $('kCost').textContent = fmt(cost); $('kCostSub').textContent = `${nc} 筆成本`;
+  const kp = $('kProfit'); kp.textContent = fmt(profit,true); kp.className = 'val num '+(profit>=0?'pos':'neg'); $('kProfitCard').className = 'kpi '+(profit>=0?'k-green':'k-red');
+  $('kRoi').textContent = cost>0 ? `ROI ${(profit/cost*100).toFixed(1)}%` : 'ROI —';
+  $('kCount').textContent = base.length;
+  const accs = base.filter(r=>r.type==='cost' && r.cat==='購買帳號').length;
+  $('kAcc').textContent = accs ? `購買帳號 ${accs} 次 · 每次出金平均 ${np?fmt(net/np):'—'}` : '—';
+
+  // 公司下拉
+  const firms = [...new Set([...recs.values()].map(r=>r.firm))].sort();
+  const fSel = $('fFirm'); const cur = st.fFirm;
+  fSel.innerHTML = '<option value="all">全部公司</option>' + firms.map(f=>`<option ${f===cur?'selected':''}>${esc(f)}</option>`).join('');
+  if (cur!=='all' && !firms.includes(cur)) st.fFirm='all';
+  $('firmList').innerHTML = firms.map(f=>`<option value="${esc(f)}">`).join('');
+
+  drawChart(base); drawCal(); drawTable(base);
+}
+
+function niceStep(range){ const raw = range/4; const p = Math.pow(10, Math.floor(Math.log10(raw||1))); const n = raw/p; return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p; }
+function drawChart(base){
+  const el = $('chart'); const W = Math.max(300, el.clientWidth||700), H = 310;
+  const groups = new Map();
+  if (st.chartMode==='month') {
+    const ds = base.map(r=>r.date.slice(0,7)).sort();
+    if (ds.length) { let [y,m] = ds[0].split('-').map(Number); const [ey,em] = ds[ds.length-1].split('-').map(Number);
+      while (y<ey || (y===ey && m<=em)) { groups.set(`${y}-${pad(m)}`, {g:0,n:0,c:0}); m++; if (m>12){m=1;y++;} } }
+  }
+  base.forEach(r => { const k = st.chartMode==='month' ? r.date.slice(0,7) : r.firm; if(!groups.has(k)) groups.set(k,{g:0,n:0,c:0}); const o = groups.get(k);
+    if (r.type==='payout'){ o.g+=r.amount; o.n+=netOf(r); } else o.c+=r.amount; });
+  const keys = [...groups.keys()];
+  if (!keys.length) { el.innerHTML = '<div class="empty-state">這段期間沒有資料</div>'; return; }
+  const top = Math.max(0,...keys.map(k=>groups.get(k).g)), bot = Math.max(0,...keys.map(k=>groups.get(k).c));
+  const step = niceStep(top+bot||1);
+  const yMax = Math.max(step, Math.ceil(top*1.15/step)*step), yMin = -Math.max(step, Math.ceil(bot*1.15/step)*step);
+  const L=66, R=12, T=26, B=50, pw=W-L-R, ph=H-T-B;
+  const y = v => T + (yMax - v)/(yMax - yMin)*ph;
+  const bw = Math.min(46, pw/keys.length*0.42);
+  const narrow = pw/keys.length < 90;
+  const lbl = v => narrow ? fmtK(v).replace('+','') : fmt(Math.abs(v));
+  let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="每月出金與成本">`;
+  for (let v = yMin; v <= yMax+1e-6; v += step) {
+    s += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="${v===0?'#566477':'#253041'}" stroke-dasharray="${v===0?'':'3 4'}"/>`;
+    s += `<text x="${L-8}" y="${y(v)+4}" text-anchor="end" fill="#c3cdd9" font-size="12" font-family="JetBrains Mono,monospace">${v<0?'-':''}$${Math.abs(v).toLocaleString('en-US')}</text>`;
+  }
+  let lastYear = null;
+  keys.forEach((k,i) => {
+    const o = groups.get(k), cx = L + pw*(i+.5)/keys.length, x = cx-bw/2;
+    if (o.g>0) {
+      s += `<rect x="${x}" y="${y(o.n)}" width="${bw}" height="${y(0)-y(o.n)}" fill="#f5b83d" rx="2"><title>${k} 實際到手 ${fmt(o.n)}</title></rect>`;
+      if (o.g-o.n>0.005) s += `<rect x="${x}" y="${y(o.g)}" width="${bw}" height="${y(o.n)-y(o.g)}" fill="#8a6a26"><title>分成差額 ${fmt(o.g-o.n)}</title></rect>`;
+      s += `<text x="${cx}" y="${y(o.g)-7}" text-anchor="middle" fill="#f5b83d" font-size="12" font-weight="600" font-family="JetBrains Mono,monospace">+${lbl(o.n)}</text>`;
+    }
+    if (o.c>0) {
+      s += `<rect x="${x}" y="${y(0)}" width="${bw}" height="${y(-o.c)-y(0)}" fill="#ff7b72" opacity=".9" rx="2"><title>${k} 成本 ${fmt(o.c)}</title></rect>`;
+      s += `<text x="${cx}" y="${y(-o.c)+16}" text-anchor="middle" fill="#ff7b72" font-size="12" font-weight="600" font-family="JetBrains Mono,monospace">-${lbl(o.c)}</text>`;
+    }
+    let lab = k, yr = '';
+    if (st.chartMode==='month') { const [yy,mm] = k.split('-'); lab = (+mm)+'月'; if (yy!==lastYear) { yr = yy+'年'; lastYear = yy; } }
+    s += `<text x="${cx}" y="${H-B+20}" text-anchor="middle" fill="#f3f6fa" font-size="13" font-weight="600">${esc(lab)}</text>`;
+    if (yr) s += `<text x="${cx}" y="${H-B+38}" text-anchor="middle" fill="#97a4b4" font-size="12">${yr}</text>`;
+  });
+  el.innerHTML = s + '</svg>';
+}
+
+function drawCal(){
+  if (st.calY==null) { const t = new Date(); st.calY=t.getFullYear(); st.calM=t.getMonth()+1; }
+  const Y=st.calY, M=st.calM, pre = `${Y}-${pad(M)}`;
+  $('calTitle').textContent = `${Y}年${M}月`;
+  const byDay = {}; let mNet = 0;
+  [...recs.values()].forEach(r => { if (!r.date.startsWith(pre)) return; const d=+r.date.slice(8,10); const o = byDay[d] ||= {p:0,c:0};
+    if (r.type==='payout'){ const n=netOf(r); o.p+=n; mNet+=n; } else { o.c+=r.amount; mNet-=r.amount; } });
+  const cn = $('calNet'); cn.textContent = `本月盈虧 ${fmt(mNet,true)}`; cn.className = 'pill num '+(mNet>=0?'p':'c');
+  const first = new Date(Y,M-1,1).getDay(), days = new Date(Y,M,0).getDate(), T = todayISO();
+  let h = ['日','一','二','三','四','五','六'].map(d=>`<div class="dow">${d}</div>`).join('');
+  for (let i=0;i<first;i++) h += '<div class="day empty"></div>';
+  for (let d=1; d<=days; d++) { const o = byDay[d]; const iso = `${pre}-${pad(d)}`;
+    h += `<div class="day${o&&o.p?' has-p':''}${iso===T?' today':''}"><span class="d">${d}</span>${o&&o.p?`<span class="amt pos">${fmtK(o.p)}</span>`:''}${o&&o.c?`<span class="amt neg">${fmtK(-o.c)}</span>`:''}</div>`; }
+  $('cal').innerHTML = h;
+}
+
+function drawTable(base){
+  let rows = base.filter(r => (st.fType==='all' || r.type===st.fType) && (st.fFirm==='all' || r.firm===st.fFirm));
+  rows.sort((a,b) => b.date.localeCompare(a.date) || (a.type===b.type?0:a.type==='payout'?-1:1) || b.id.localeCompare(a.id));
+  const pages = Math.max(1, Math.ceil(rows.length/st.size)); st.page = Math.min(st.page, pages);
+  const start = (st.page-1)*st.size, view = rows.slice(start, start+st.size);
+  $('tbody').innerHTML = view.map(r => {
+    const pay = r.type==='payout';
+    const pill = pay ? '<span class="pill p">出金</span>' : `<span class="pill ${r.cat==='購買帳號'?'c':'o'}">${esc(r.cat||'成本')}</span>`;
+    return `<tr><td class="num c-date">${r.date}</td><td class="c-firm">${esc(r.firm)}<span class="sz">${r.size?' · '+esc(r.size):''}</span></td><td class="c-size">${esc(r.size)}</td><td class="c-type">${pill}</td>
+      <td class="r num c-amt">${fmt(r.amount)}</td><td class="r num c-split">${pay?(r.split??100)+'%':'—'}</td><td class="r num c-net ${pay?'pos':'nil'}">${pay?'<span class="sz">到手 </span>'+fmt(netOf(r))+'<span class="sz"> ('+(r.split??100)+'%)</span>':'—'}</td>
+      <td class="note">${esc(r.note)}</td><td class="r c-op"><button class="icon-btn" data-edit="${esc(r.id)}" aria-label="編輯">✎</button></td></tr>`;
+  }).join('');
+  $('emptyState').hidden = rows.length>0;
+  $('pgInfo').textContent = rows.length ? `顯示第 ${start+1} - ${start+view.length} 筆，共 ${rows.length} 筆` : '共 0 筆';
+  $('pgNum').textContent = `${st.page} / ${pages}`;
+  $('pgPrev').disabled = st.page<=1; $('pgNext').disabled = st.page>=pages;
+}
+
+/* ---------- 互動 ---------- */
+const toast = t => { const e=$('toast'); e.textContent=t; e.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>e.hidden=true,2200); };
+$('periods').addEventListener('click', e => { const b = e.target.closest('.chip'); if(!b) return;
+  document.querySelectorAll('#periods .chip').forEach(c=>c.classList.toggle('on', c===b));
+  st.period = b.dataset.p; $('customRange').hidden = st.period!=='custom'; st.page=1; render(); });
+$('cFrom').addEventListener('change', e => { st.from=e.target.value; render(); });
+$('cTo').addEventListener('change', e => { st.to=e.target.value; render(); });
+$('chartMode').addEventListener('click', e => { const b=e.target.closest('button'); if(!b) return;
+  document.querySelectorAll('#chartMode button').forEach(c=>c.classList.toggle('on',c===b)); st.chartMode=b.dataset.m; render(); });
+$('calPrev').onclick = () => { st.calM--; if(st.calM<1){st.calM=12;st.calY--;} drawCal(); };
+$('calNext').onclick = () => { st.calM++; if(st.calM>12){st.calM=1;st.calY++;} drawCal(); };
+$('fType').onchange = e => { st.fType=e.target.value; st.page=1; render(); };
+$('fFirm').onchange = e => { st.fFirm=e.target.value; st.page=1; render(); };
+$('pgSize').onchange = e => { st.size=+e.target.value; st.page=1; render(); };
+$('pgPrev').onclick = () => { st.page--; render(); };
+$('pgNext').onclick = () => { st.page++; render(); };
+let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt=setTimeout(()=>drawChart(inPeriod()),120); });
+
+// 清空（兩段確認）
+let clearArmed = false;
+$('btnClear').onclick = async () => {
+  const b = $('btnClear');
+  if (!clearArmed) { clearArmed=true; b.textContent='再按一次確認清空'; b.classList.add('danger'); setTimeout(()=>{clearArmed=false;b.textContent='清空全部資料';b.classList.remove('danger');},4000); return; }
+  clearArmed=false; b.textContent='清空中…';
+  try { for (const id of [...recs.keys()]) await del(id); toast('已清空'); } catch(e){ toast('清空失敗：'+(e.code||e.message)); }
+  b.textContent='清空全部資料'; b.classList.remove('danger'); render();
+};
+
+// 編輯 / 新增
+let editing = null, delArmed = false;
+function openEdit(rec, kind){
+  editing = rec ? rec.id : null; delArmed=false; $('eDel').textContent='刪除';
+  const r = rec || {date:todayISO(), firm:st.fFirm!=='all'?st.fFirm:'Lucid Trading', size:'50k', type:kind, cat:kind==='payout'?'出金':'購買帳號', amount:'', split:+$('defSplit').value||90, note:''};
+  $('edTitle').textContent = rec ? '編輯記錄' : (kind==='payout'?'新增出金':'新增成本');
+  $('eDate').value=r.date; $('eFirm').value=r.firm; $('eSize').value=r.size||''; $('eAmt').value=r.amount; $('eNote').value=r.note||'';
+  $('eType').value = r.type==='payout' ? 'payout' : (r.cat==='購買帳號'?'購買帳號':'其他成本');
+  $('eSplit').value = r.split ?? 90; $('eSplitWrap').hidden = $('eType').value!=='payout';
+  $('eDel').hidden = !rec; $('editModal').hidden=false; $('eAmt').focus();
+}
+$('eType').onchange = () => $('eSplitWrap').hidden = $('eType').value!=='payout';
+$('btnAddPayout').onclick = () => openEdit(null,'payout');
+$('btnAddCost').onclick = () => openEdit(null,'cost');
+$('tbody').addEventListener('click', e => { const b=e.target.closest('[data-edit]'); if(b) openEdit(recs.get(b.dataset.edit)); });
+$('eCancel').onclick = () => $('editModal').hidden=true;
+$('eSave').onclick = async () => {
+  const t = $('eType').value, amt = parseFloat($('eAmt').value), date = $('eDate').value;
+  if (!date || !(amt>0)) { toast('請填日期和大於 0 的金額'); return; }
+  const rec = {id: editing || safeId('m-'+Date.now().toString(36)), date, firm:$('eFirm').value.trim()||'未指定', size:$('eSize').value.trim(),
+    type: t==='payout'?'payout':'cost', cat: t==='payout'?'出金':t, amount:amt, split: t==='payout' ? (parseFloat($('eSplit').value)||0) : null, note:$('eNote').value.trim()};
+  try { await put(rec); $('editModal').hidden=true; toast('已儲存'); render(); } catch(e){ toast('儲存失敗：'+(e.code||e.message)); }
+};
+$('eDel').onclick = async () => {
+  if (!delArmed) { delArmed=true; $('eDel').textContent='再按一次刪除'; return; }
+  try { await del(editing); $('editModal').hidden=true; toast('已刪除'); render(); } catch(e){ toast('刪除失敗：'+(e.code||e.message)); }
+};
+
+// 匯入
+const log = $('impLog');
+function logLine(t, cls){ log.hidden=false; const d=document.createElement('div'); if(cls) d.className=cls; d.textContent=t; log.appendChild(d); log.scrollTop=log.scrollHeight; }
+async function saveParsed(label, res){
+  const ks = Object.keys(res.kinds);
+  const failMsg = () => { if (res.failed.length) logLine(`　✕ 狀態非 COMPLETED/PAID，未記入 ${res.failed.length} 筆：${res.failed.join('、')}`, 'bad'); };
+  if (!res.recs.length) { logLine(`${label}：沒有可記入的資料${res.skipped?`（略過 ${res.skipped} 列 0 元/空白）`:''}`, 'bad'); failMsg(); return; }
+  let added=0, dup=0;
+  const fresh = [];
+  for (const r of res.recs) {
+    const old = recs.get(r.id);
+    if (old) { dup++; continue; }   // 單號已存在 → 不重複記入，也不覆蓋你改過的內容
+    fresh.push(r); added++;
+  }
+  const jobs = fresh.map(r => () => put(r));
+  for (let i=0;i<jobs.length;i+=8) await Promise.all(jobs.slice(i,i+8).map(f=>f()));
+  logLine(`${label} · ${ks.map(k=>KIND_NAME[k]+' '+res.kinds[k]+' 筆').join('、')} → 新增 ${added}、重複略過 ${dup+res.dupInFile}${res.skipped?`、0 元/空白 ${res.skipped}`:''}`, 'ok');
+  failMsg();
+  render();
+}
+async function importFiles(files){
+  if (typeof XLSX==='undefined') { logLine('Excel 解析元件沒有載入，請重新整理頁面', 'bad'); return; }
+  const split = +$('defSplit').value || 90;
+  for (const f of files) {
+    try {
+      if (/\.json$/i.test(f.name)) {
+        const arr = JSON.parse(await f.text());
+        const ok = (Array.isArray(arr)?arr:[]).filter(r => r && r.id && r.date && r.type && r.amount>0).map(r => ({...r, id:safeId(r.id)}));
+        await saveParsed(f.name, {recs:ok, kinds:{backup:ok.length}, skipped:0, failed:[], dupInFile:0});
+        continue;
+      }
+      const wb = XLSX.read(await f.arrayBuffer(), {type:'array'});
+      for (const name of wb.SheetNames) {
+        const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, raw:true, defval:''});
+        const res = parseAoa(aoa, null, split);
+        if (!res.recs.length && !Object.keys(res.kinds).length) { logLine(`${f.name} / ${name}：不認得的表格格式，已略過`); continue; }
+        await saveParsed(`${f.name} / ${name}`, res);
+      }
+    } catch(e) { logLine(`${f.name}：讀取失敗 ${e.code||e.message}`, 'bad'); }
+  }
+}
+$('btnImport').onclick = () => { log.innerHTML=''; log.hidden=true; $('importModal').hidden=false; };
+$('impClose').onclick = () => $('importModal').hidden=true;
+$('fileInput').onchange = e => { importFiles([...e.target.files]); e.target.value=''; };
+const drop = $('drop');
+['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => importFiles([...e.dataTransfer.files]));
+$('impPaste').onclick = async () => {
+  const txt = $('pasteBox').value.trim(); if (!txt) { toast('先貼上表格內容'); return; }
+  const aoa = txt.split(/\r?\n/).map(l => l.split('\t'));
+  const res = parseAoa(aoa, $('pasteKind').value || null, +$('defSplit').value || 90);
+  if (!res.recs.length && !$('pasteKind').value) { logLine('沒有偵測到表頭，請在「貼上內容的格式」選擇來源後再匯入', 'bad'); return; }
+  await saveParsed('貼上內容', res); $('pasteBox').value='';
+};
+document.addEventListener('keydown', e => { if (e.key==='Escape') { $('importModal').hidden=true; $('editModal').hidden=true; } });
+
+render();
+initStore();
+})();
+</script>
+</body>
+</html>

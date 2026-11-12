@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 原本 my-stock-app（交易戰情室）用的資料，維持原樣可讀寫
+    match /users/{docId} {
+      allow read, write: if true;
+    }
+
+    // 出金中心：只有登入者本人能讀寫自己的資料
+    match /payoutCenter/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}
