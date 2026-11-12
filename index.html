@@ -697,6 +697,12 @@ const drop = $('drop');
 drop.addEventListener('drop', e => importFiles([...e.dataTransfer.files]));
 $('impPaste').onclick = async () => {
   const txt = $('pasteBox').value.trim(); if (!txt) { toast('先貼上表格內容'); return; }
+  if (txt.startsWith('[')) {
+    try { const arr = JSON.parse(txt); const ok = arr.filter(r => r && r.id && r.date && r.type && r.amount>0).map(r => ({...r, id:safeId(r.id)}));
+      await saveParsed('貼上 JSON', {recs:ok, kinds:{backup:ok.length}, skipped:0, failed:[], dupInFile:0}); $('pasteBox').value=''; }
+    catch(e) { logLine('JSON 格式錯誤：'+e.message, 'bad'); }
+    return;
+  }
   const aoa = txt.split(/\r?\n/).map(l => l.split('\t'));
   const res = parseAoa(aoa, $('pasteKind').value || null, +$('defSplit').value || 90);
   if (!res.recs.length && !$('pasteKind').value) { logLine('沒有偵測到表頭，請在「貼上內容的格式」選擇來源後再匯入', 'bad'); return; }
