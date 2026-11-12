@@ -330,7 +330,7 @@ const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov
 const pad = n => String(n).padStart(2,'0');
 const ymd = (y,m,d) => `${y}-${pad(m)}-${pad(d)}`;
 const todayISO = () => { const t = new Date(); return ymd(t.getFullYear(), t.getMonth()+1, t.getDate()); };
-const fmt = (v, sign=false) => { const s = Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:6}); return (v<0?'-':(sign&&v>0?'+':''))+'$'+s; };
+const fmt = (v, sign=false) => { const s = Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:2}); return (v<0?'-':(sign&&v>0?'+':''))+'$'+s; };
 const fmtK = v => { const a=Math.abs(v); const s = a>=1000 ? (a/1000).toFixed(a>=10000?0:1).replace(/\.0$/,'')+'k' : a.toFixed(0); return (v<0?'-':'+')+'$'+s; };
 const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const safeId = s => String(s).replace(/[^A-Za-z0-9_\-~:@+]/g,'_').slice(0,190);
@@ -485,7 +485,7 @@ async function syncVestFromGmail(){
       const t = bodyText(m.payload);
       if (/Vest receipt/i.test(subj)) {
         const rc = (t.match(/Receipt (VST-\d+-\d+)/)||[])[1]; const price = +((t.match(/Price per account:\s*\$([\d.,]+)/)||[])[1]||'0').replace(/,/g,'');
-        const paid = +((t.match(/Confirmed purchase amount \(USD\):\s*\$([\d.,]+)/)||[])[1]||'0').replace(/,/g,'');
+        const paid = +((t.match(/(?:Confirmed purchase amount \(USD\)|Total paid \(USD\)|Amount paid|Confirmed purchase amount):\s*\$([\d.,]+)/)||[])[1]||'0').replace(/,/g,'');
         const qty = +((t.match(/Number of accounts:\s*(\d+)/)||[])[1]||1);
         const prod = ((t.match(/\n(Vest Capital[^\n]+)/)||[])[1]||'').trim();
         if (rc && paid>0) receipts.push({ms:+m.internalDate, rc, price, unit: Math.round(paid/qty*100)/100, qty, prod});

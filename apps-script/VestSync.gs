@@ -80,7 +80,7 @@ function syncVest() {
       if (!/vestmarkets\.com/i.test(from)) return;
       if (/Vest receipt/i.test(subj)) {
         const rc = (t.match(/Receipt (VST-\d+-\d+)/) || [])[1];
-        const paid = num_((t.match(/Confirmed purchase amount \(USD\):\s*\$([\d.,]+)/) || [])[1]);
+        const paid = num_((t.match(/(?:Confirmed purchase amount \(USD\)|Total paid \(USD\)|Amount paid|Confirmed purchase amount):\s*\$([\d.,]+)/) || [])[1]);
         const price = num_((t.match(/Price per account:\s*\$([\d.,]+)/) || [])[1]);
         const qty = +((t.match(/Number of accounts:\s*(\d+)/) || [])[1] || 1);
         const prod = ((t.match(/\n(Vest Capital[^\n]+)/) || [])[1] || '').trim();
@@ -106,7 +106,8 @@ function syncVest() {
       const firstSeq = seq + 1; seq += r.qty;
       if (known.has(r.rc)) return;
       const legacyId = 'vest-acc-' + String(firstSeq).padStart(2, '0');
-      if (r.qty === 1 && legacy[legacyId]) {
+      const lp = legacy[legacyId] && +(((legacy[legacyId].note || '').match(/原價 \$([\d.]+)/) || [])[1] || 0);
+      if (r.qty === 1 && legacy[legacyId] && lp === r.price) {
         const sp0 = spec_(r.prod), nn0 = String(firstSeq).padStart(2, '0');
         writeRecord_({ id: legacyId, date: tw_(r.date), firm: 'Vest Markets', size: sp0.size, type: 'cost', cat: '購買帳號',
           amount: r.paid, split: null, note: 'Account ' + nn0 + ' · ' + sp0.spec + ' · 原價 $' + r.price + ' · 收據 ' + r.rc });
