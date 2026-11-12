@@ -654,16 +654,18 @@ async function saveParsed(label, res){
   const ks = Object.keys(res.kinds);
   const failMsg = () => { if (res.failed.length) logLine(`　✕ 狀態非 COMPLETED/PAID，未記入 ${res.failed.length} 筆：${res.failed.join('、')}`, 'bad'); };
   if (!res.recs.length) { logLine(`${label}：沒有可記入的資料${res.skipped?`（略過 ${res.skipped} 列 0 元/空白）`:''}`, 'bad'); failMsg(); return; }
-  let added=0, dup=0;
+  let added=0, dup=0, upd=0;
   const fresh = [];
   for (const r of res.recs) {
     const old = recs.get(r.id);
-    if (old) { dup++; continue; }   // 單號已存在 → 不重複記入，也不覆蓋你改過的內容
+    if (old) { const same = ['date','firm','size','type','cat','amount','split','note'].every(k => String(old[k]??'')===String(r[k]??''));
+      if (res.kinds.backup && !same) { fresh.push(r); upd++; continue; }
+      dup++; continue; }   // 單號已存在 → 不重複記入，也不覆蓋你改過的內容
     fresh.push(r); added++;
   }
   const jobs = fresh.map(r => () => put(r));
   for (let i=0;i<jobs.length;i+=8) await Promise.all(jobs.slice(i,i+8).map(f=>f()));
-  logLine(`${label} · ${ks.map(k=>KIND_NAME[k]+' '+res.kinds[k]+' 筆').join('、')} → 新增 ${added}、重複略過 ${dup+res.dupInFile}${res.skipped?`、0 元/空白 ${res.skipped}`:''}`, 'ok');
+  logLine(`${label} · ${ks.map(k=>KIND_NAME[k]+' '+res.kinds[k]+' 筆').join('、')} → 新增 ${added}${upd?'、更新 '+upd:''}、重複略過 ${dup+res.dupInFile}${res.skipped?`、0 元/空白 ${res.skipped}`:''}`, 'ok');
   failMsg();
   render();
 }
