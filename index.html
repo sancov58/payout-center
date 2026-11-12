@@ -495,11 +495,15 @@ async function syncVestFromGmail(){
       }
     }
     receipts.sort((a,b)=>a.ms-b.ms);
-    const out = []; let n = 0;
-    for (const r of receipts) for (let k=0;k<r.qty;k++) { n++; const sp = specOf(r.prod);
-      out.push({id:'vest-acc-'+String(n).padStart(2,'0'), date:twDate(r.ms), firm:'Vest Markets', size:sp.size, type:'cost', cat:'購買帳號', amount:r.unit, split:null, note:`Account ${String(n).padStart(2,'0')} · ${sp.spec} · 原價 $${r.price} · 收據 ${r.rc}`}); }
+    const vrecs = [...recs.values()].filter(r => firmGroup(r.firm)==='Vest');
+    const known = new Set(vrecs.map(r => ((r.note||'').match(/VST-\d+-\d+/)||[])[0]).filter(Boolean));
+    let n = 0; vrecs.forEach(r => { const m = /^vest-acc-(\d+)/.exec(r.id); if (m) n = Math.max(n, +m[1]); });
+    const out = [];
+    for (const r of receipts) { if (known.has(r.rc)) continue; known.add(r.rc); for (let k=0;k<r.qty;k++) { n++; const sp = specOf(r.prod);
+      out.push({id:'vest-acc-'+String(n).padStart(2,'0'), date:twDate(r.ms), firm:'Vest Markets', size:sp.size, type:'cost', cat:'購買帳號', amount:r.unit, split:null, note:`Account ${String(n).padStart(2,'0')} · ${sp.spec} · 原價 $${r.price} · 收據 ${r.rc}`}); } }
     const existingPays = [...recs.values()].filter(r => firmGroup(r.firm)==='Vest' && r.type==='payout');
     for (const p of payouts) { const d = twDate(p.ms);
+      if (recs.has('vest-pay-mail-'+p.id)) continue;
       if (existingPays.some(e => e.date===d && Math.abs(netOf(e)-p.amt) < 0.05)) continue;
       out.push({id:'vest-pay-mail-'+p.id, date:d, firm:'Vest Markets', size:'', type:'payout', cat:'出金', amount:p.amt, split:100, note:`Gmail 出金通知 · 實收 ${p.amt} USDC`}); }
     log.innerHTML=''; $('importModal').hidden=false;
