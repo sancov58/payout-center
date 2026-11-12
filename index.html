@@ -48,6 +48,11 @@ h1::before{content:"";width:10px;height:24px;border-radius:3px;background:var(--
 .btn.danger{color:var(--red);border-color:var(--red-line);background:transparent}
 .btn.ghost{background:transparent}
 .btn:disabled{opacity:.4;cursor:default}
+.firmtabs{display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--line);margin-top:-4px}
+.firmtabs button{border:0;background:transparent;color:var(--muted);padding:10px 16px;font-size:15px;font-weight:600;border-bottom:3px solid transparent;white-space:nowrap}
+.firmtabs button.on{color:var(--fg);border-bottom-color:var(--gold)}
+.firmtabs button:hover:not(.on){color:var(--fg)}
+.firmtabs .cnt{font-family:var(--f-num);font-size:12px;color:var(--faint);margin-left:6px}
 .chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px}
 .chip{border:0;background:transparent;color:var(--muted);padding:6px 13px;border-radius:7px;font-size:14px;font-weight:500}
 .chip.on{background:var(--gold);color:var(--gold-ink);font-weight:700}
@@ -185,6 +190,8 @@ textarea.inp{width:100%;min-height:90px;resize:vertical;font-family:var(--f-num)
       <button class="btn gold" id="btnAddPayout">＋ 新增出金</button>
     </div>
   </div>
+
+  <div class="firmtabs" id="firmTabs" role="tablist" aria-label="平台"></div>
 
   <div class="top">
     <div class="chips" id="periods">
@@ -453,7 +460,7 @@ function initStore(){
 }
 
 /* ---------- 篩選與計算 ---------- */
-const st = { period:'all', from:'', to:'', chartMode:'month', fType:'all', fFirm:'all', page:1, size:20, calY:null, calM:null };
+const st = { firmTab:(()=>{try{return localStorage.getItem('pc-firmTab')||'all'}catch(e){return 'all'}})(), period:'all', from:'', to:'', chartMode:'month', fType:'all', fFirm:'all', page:1, size:20, calY:null, calM:null };
 const netOf = r => r.type==='payout' ? r.amount*((r.split==null?100:r.split)/100) : 0;
 function periodRange(){
   const t = new Date(); const T = todayISO();
@@ -465,10 +472,20 @@ function periodRange(){
     default: return ['0000-00-00','9999-99-99'];
   }
 }
-function inPeriod(){ const [a,b] = periodRange(); return [...recs.values()].filter(r => r.date>=a && r.date<=b); }
+const firmGroup = f => /lucid/i.test(f) ? 'Lucid' : /tradeify/i.test(f) ? 'Tradeify' : /vest/i.test(f) ? 'Vest' : f;
+const inTab = r => st.firmTab==='all' || firmGroup(r.firm)===st.firmTab;
+function inPeriod(){ const [a,b] = periodRange(); return [...recs.values()].filter(r => r.date>=a && r.date<=b && inTab(r)); }
+function drawFirmTabs(){
+  const counts = {}; [...recs.values()].forEach(r => { const g=firmGroup(r.firm); counts[g]=(counts[g]||0)+1; });
+  const order = ['Lucid','Tradeify','Vest']; const gs = Object.keys(counts).sort((a,b)=>(order.indexOf(a)+1||99)-(order.indexOf(b)+1||99));
+  if (st.firmTab!=='all' && !counts[st.firmTab]) st.firmTab='all';
+  const tabs = [['all','全部合併',recs.size], ...gs.map(g=>[g,g,counts[g]])];
+  $('firmTabs').innerHTML = tabs.map(([k,l,c])=>`<button role="tab" data-f="${esc(k)}" class="${st.firmTab===k?'on':''}" aria-selected="${st.firmTab===k}">${esc(l)}<span class="cnt">${c}</span></button>`).join('');
+}
 
 /* ---------- 繪製 ---------- */
 function render(){
+  drawFirmTabs();
   const base = inPeriod();
   // KPI
   let gross=0, net=0, cost=0, np=0, nc=0;
@@ -544,7 +561,7 @@ function drawCal(){
   const Y=st.calY, M=st.calM, pre = `${Y}-${pad(M)}`;
   $('calTitle').textContent = `${Y}年${M}月`;
   const byDay = {}; let mNet = 0;
-  [...recs.values()].forEach(r => { if (!r.date.startsWith(pre)) return; const d=+r.date.slice(8,10); const o = byDay[d] ||= {p:0,c:0};
+  [...recs.values()].forEach(r => { if (!r.date.startsWith(pre) || !inTab(r)) return; const d=+r.date.slice(8,10); const o = byDay[d] ||= {p:0,c:0};
     if (r.type==='payout'){ const n=netOf(r); o.p+=n; mNet+=n; } else { o.c+=r.amount; mNet-=r.amount; } });
   const cn = $('calNet'); cn.textContent = `本月盈虧 ${fmt(mNet,true)}`; cn.className = 'pill num '+(mNet>=0?'p':'c');
   const first = new Date(Y,M-1,1).getDay(), days = new Date(Y,M,0).getDate(), T = todayISO();
@@ -575,6 +592,7 @@ function drawTable(base){
 
 /* ---------- 互動 ---------- */
 const toast = t => { const e=$('toast'); e.textContent=t; e.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>e.hidden=true,2200); };
+$('firmTabs').addEventListener('click', e => { const b=e.target.closest('button'); if(!b) return; st.firmTab=b.dataset.f; st.fFirm='all'; st.page=1; try{localStorage.setItem('pc-firmTab',st.firmTab)}catch(e){} render(); });
 $('periods').addEventListener('click', e => { const b = e.target.closest('.chip'); if(!b) return;
   document.querySelectorAll('#periods .chip').forEach(c=>c.classList.toggle('on', c===b));
   st.period = b.dataset.p; $('customRange').hidden = st.period!=='custom'; st.page=1; render(); });
@@ -605,7 +623,7 @@ $('btnClear').onclick = async () => {
 let editing = null, delArmed = false;
 function openEdit(rec, kind){
   editing = rec ? rec.id : null; delArmed=false; $('eDel').textContent='刪除';
-  const r = rec || {date:todayISO(), firm:st.fFirm!=='all'?st.fFirm:'Lucid Trading', size:'50k', type:kind, cat:kind==='payout'?'出金':'購買帳號', amount:'', split:+$('defSplit').value||90, note:''};
+  const r = rec || {date:todayISO(), firm:st.fFirm!=='all'?st.fFirm:({Lucid:'Lucid Trading',Tradeify:'Tradeify',Vest:'Vest Markets'}[st.firmTab]||'Lucid Trading'), size:st.firmTab==='Vest'?'':'50k', type:kind, cat:kind==='payout'?'出金':'購買帳號', amount:'', split:st.firmTab==='Vest'?95:(+$('defSplit').value||90), note:''};
   $('edTitle').textContent = rec ? '編輯記錄' : (kind==='payout'?'新增出金':'新增成本');
   $('eDate').value=r.date; $('eFirm').value=r.firm; $('eSize').value=r.size||''; $('eAmt').value=r.amount; $('eNote').value=r.note||'';
   $('eType').value = r.type==='payout' ? 'payout' : (r.cat==='購買帳號'?'購買帳號':'其他成本');
