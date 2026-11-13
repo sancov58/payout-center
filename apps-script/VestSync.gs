@@ -92,7 +92,8 @@ function syncVest() {
     }));
 
     // 比對現有資料
-    const recs = listRecords_().filter(r => /vest/i.test(r.firm || ''));
+    const allRecs = listRecords_();
+    const recs = allRecs.filter(r => /vest/i.test(r.firm || ''));
     const known = new Set(recs.map(r => ((r.note || '').match(/VST-\d+-\d+/) || [])[0]).filter(Boolean));
     let maxAcc = 0; recs.forEach(r => { const m = /^vest-acc-(\d+)/.exec(r.id); if (m) maxAcc = Math.max(maxAcc, +m[1]); });
     const pays = recs.filter(r => r.type === 'payout');
@@ -116,6 +117,7 @@ function syncVest() {
       const sp = spec_(r.prod), unit = Math.round(r.paid / r.qty * 100) / 100;
       for (let k = 0; k < r.qty; k++) {
         maxAcc++; const nn = String(maxAcc).padStart(2, '0');
+        notify_('🧾 Vest 購買帳號 Account ' + nn + '\n' + sp.spec + '\n成本 $' + unit + '（' + tw_(r.date) + '）');
         writeRecord_({ id: 'vest-acc-' + nn, date: tw_(r.date), firm: 'Vest Markets', size: sp.size, type: 'cost', cat: '購買帳號',
           amount: unit, split: null, note: 'Account ' + nn + ' · ' + sp.spec + ' · 原價 $' + r.price + ' · 收據 ' + r.rc });
         added++;
@@ -129,8 +131,83 @@ function syncVest() {
       if (pays.some(e => e.date === d && Math.abs(e.amount * (e.split == null ? 100 : e.split) / 100 - p.amt) < 0.05)) return;
       writeRecord_({ id: id, date: d, firm: 'Vest Markets', size: '', type: 'payout', cat: '出金', amount: p.amt, split: 100, note: 'Gmail 出金通知 · 實收 ' + p.amt + ' USDC' });
       pays.push({ date: d, amount: p.amt, split: 100 }); added++;
+      notify_('💰 Vest 出金到帳 $' + p.amt + ' USDC（' + d + '）');
     });
 
     if (added) console.log('Vest 同步：新增 ' + added + ' 筆');
+    syncLucidTdy_(allRecs);
   } finally { lock.releaseLock(); }
 }
+
+
+/* ---------- Lucid / Tradeify ---------- */
+function syncLucidTdy_(allRecs) {
+  const ids = new Set(allRecs.map(r => r.id));
+  const pays = allRecs.filter(r => r.type === 'payout' && /lucid/i.test(r.firm || ''));
+  const dayDiff = (a, b) => Math.abs((new Date(a) - new Date(b)) / 864e5);
+  let added = 0;
+
+  // Lucid 訂單（Order Processing 信）
+  GmailApp.search('from:lucidtrading.com subject:"Order Processing" in:anywhere', 0, 200).forEach(th => th.getMessages().forEach(m => {
+    const t = m.getPlainBody();
+    const ord = (t.match(/Order number:\s*(\d+)/) || [])[1];
+    const total = num_((t.match(/Total:\s*\|?\s*\$([\d.,]+)/) || [])[1]);
+    if (!ord || !(total > 0)) return;
+    const id = 'lucid-o-' + ord;
+    if (ids.has(id)) return;
+    const prod = ((t.match(/\|\s*(Lucid[A-Za-z]*\s+\d+K[^|]*)\|/) || [])[1] || '').trim();
+    const size = ((prod.match(/(\d+)K/i) || [])[1] || '') ;
+    writeRecord_({ id: id, date: tw_(m.getDate()), firm: 'Lucid Trading', size: size ? size + 'k' : '', type: 'cost', cat: '購買帳號', amount: total, split: null, note: '#' + ord + ' · ' + prod });
+    ids.add(id); added++;
+    notify_('🧾 Lucid 購買 ' + prod + '\n成本 $' + total + '（' + tw_(m.getDate()) + '）');
+  }));
+
+  // Lucid 出金（Payout Sent! 信，金額為實收，預設 90% 分成）
+  GmailApp.search('from:lucidtrading.com subject:"Payout Sent" in:anywhere', 0, 100).forEach(th => th.getMessages().forEach(m => {
+    const net = num_((m.getPlainBody().match(/Payment Amount\s*\$([\d.,]+)/) || [])[1]);
+    if (!(net > 0)) return;
+    const id = 'lucid-pay-mail-' + m.getId(), d = tw_(m.getDate());
+    if (ids.has(id)) return;
+    if (pays.some(e => dayDiff(e.date, d) <= 2 && Math.abs(e.amount * (e.split == null ? 100 : e.split) / 100 - net) < 0.05)) return;
+    const gross = Math.round(net / 0.9 * 100) / 100;
+    writeRecord_({ id: id, date: d, firm: 'Lucid Trading', size: '', type: 'payout', cat: '出金', amount: gross, split: 90, note: 'Gmail 出金通知 · 實收 $' + net });
+    pays.push({ date: d, amount: gross, split: 90 }); ids.add(id); added++;
+    notify_('💰 Lucid 出金到帳 $' + net + '（' + d + '）');
+  }));
+
+  // Tradeify 訂單（account is active 信）
+  GmailApp.search('from:orders@tradeify.co subject:"account is active" in:anywhere', 0, 100).forEach(th => th.getMessages().forEach(m => {
+    const t = m.getPlainBody();
+    const ord = (t.match(/Order ID:\s*(\d+)/) || [])[1];
+    const amt = num_((t.match(/Order Amount:\s*\$?([\d.,]+)/) || [])[1]);
+    if (!ord || !(amt > 0)) return;
+    const id = 'tdfy-o-' + ord;
+    if (ids.has(id)) return;
+    const acct = (t.match(/account name is\s*([A-Z0-9]+)/) || [])[1] || '';
+    const size = ((acct.match(/^[A-Z]*?(\d{2,3})\d{6,}/) || [])[1] || '');
+    writeRecord_({ id: id, date: tw_(m.getDate()), firm: 'Tradeify', size: size ? (+size) + 'k' : '', type: 'cost', cat: '購買帳號', amount: amt, split: null, note: '#' + ord + (acct ? ' · ' + acct : '') });
+    ids.add(id); added++;
+    notify_('🧾 Tradeify 購買 ' + acct + '\n成本 $' + amt);
+  }));
+
+  if (added) console.log('Lucid/Tradeify 同步：新增 ' + added + ' 筆');
+}
+
+/* ---------- Telegram 通知 ----------
+ * 在「專案設定 → 指令碼屬性」新增：
+ *   TG_TOKEN = 你的 Telegram Bot Token
+ *   TG_CHAT  = 你的 Telegram chat id
+ * 沒設定就不會發通知。 */
+function notify_(text) {
+  const p = PropertiesService.getScriptProperties();
+  const token = p.getProperty('TG_TOKEN'), chat = p.getProperty('TG_CHAT');
+  if (!token || !chat) return;
+  try {
+    UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+      method: 'post', muteHttpExceptions: true, contentType: 'application/json',
+      payload: JSON.stringify({ chat_id: chat, text: '出金中心\n' + text })
+    });
+  } catch (e) { console.log('Telegram 通知失敗：' + e); }
+}
+
+function testNotify() { notify_('✅ 測試通知：出金中心已連上 Telegram'); }

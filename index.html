@@ -168,6 +168,15 @@ textarea.inp{width:100%;min-height:90px;resize:vertical;font-family:var(--f-num)
 .login h2{margin:0;font-size:24px}
 .login p{margin:0;color:var(--muted);font-size:14px}
 .login .err{color:var(--red);font-size:13.5px;white-space:pre-line}
+.curbox{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.rate{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:13.5px}
+.rate input{width:84px;padding:6px 8px}
+.spec-wrap{overflow-x:auto}
+.spec{min-width:720px}
+.spec td,.spec th{padding:10px 12px}
+.spec .bar{height:6px;border-radius:3px;background:var(--panel2);overflow:hidden;min-width:80px}
+.spec .bar i{display:block;height:100%;background:var(--green)}
+.spec .bar i.neg{background:var(--red)}
 .foot{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:16px;margin-top:8px}
 .userbox{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:13px;flex-wrap:wrap}
 </style>
@@ -206,7 +215,11 @@ textarea.inp{width:100%;min-height:90px;resize:vertical;font-family:var(--f-num)
         <input type="date" id="cFrom"> 至 <input type="date" id="cTo">
       </span>
     </div>
-    <span class="status" id="status">載入中…</span>
+    <div class="curbox">
+      <div class="seg" id="curSeg"><button data-c="USD" class="on">USD</button><button data-c="TWD">NT$</button></div>
+      <label class="rate" id="rateWrap" hidden>匯率 <input class="inp num" id="rateInp" type="number" step="0.01" min="1"></label>
+      <span class="status" id="status">載入中…</span>
+    </div>
   </div>
 
   <div class="kpis">
@@ -234,6 +247,11 @@ textarea.inp{width:100%;min-height:90px;resize:vertical;font-family:var(--f-num)
       <div class="cal" id="cal"></div>
       <div class="cal-legend"><span><i style="background:var(--red)"></i>購買帳號 / 成本</span><span><i style="background:var(--green)"></i>出金</span></div>
     </div>
+  </div>
+
+  <div class="panel">
+    <div class="ph"><h2>規格回本分析</h2><span class="hint">依目前頁籤與期間統計；出金沒寫規格的歸在「未對應規格」</span></div>
+    <div class="spec-wrap"><table class="spec"><thead><tr><th>規格</th><th class="r">購買數</th><th class="r">總成本</th><th class="r">平均成本</th><th class="r">出金次數</th><th class="r">到手</th><th class="r">淨損益</th><th>回本率</th></tr></thead><tbody id="specBody"></tbody></table></div>
   </div>
 
   <div class="filters">
@@ -336,8 +354,11 @@ const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov
 const pad = n => String(n).padStart(2,'0');
 const ymd = (y,m,d) => `${y}-${pad(m)}-${pad(d)}`;
 const todayISO = () => { const t = new Date(); return ymd(t.getFullYear(), t.getMonth()+1, t.getDate()); };
-const fmt = (v, sign=false) => { const s = Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:2}); return (v<0?'-':(sign&&v>0?'+':''))+'$'+s; };
-const fmtK = v => { const a=Math.abs(v); const s = a>=1000 ? (a/1000).toFixed(a>=10000?0:1).replace(/\.0$/,'')+'k' : a.toFixed(0); return (v<0?'-':'+')+'$'+s; };
+const CUR = { code:(()=>{try{return localStorage.getItem('pc-cur')||'USD'}catch(e){return 'USD'}})(), rate:(()=>{try{return +localStorage.getItem('pc-rate')||32.5}catch(e){return 32.5}})() };
+const cv = v => CUR.code==='TWD' ? v*CUR.rate : v;
+const sym = () => CUR.code==='TWD' ? 'NT$' : '$';
+const fmt = (v, sign=false) => { v = cv(v); const s = Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:CUR.code==='TWD'?0:2}); return (v<0?'-':(sign&&v>0?'+':''))+sym()+s; };
+const fmtK = v => { v = cv(v); const a=Math.abs(v); const s = a>=1000 ? (a/1000).toFixed(a>=10000?0:1).replace(/\.0$/,'')+'k' : a.toFixed(0); return (v<0?'-':'+')+sym()+s; };
 const esc = s => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const safeId = s => String(s).replace(/[^A-Za-z0-9_\-~:@+]/g,'_').slice(0,190);
 const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
@@ -573,6 +594,23 @@ function drawFirmTabs(){
 }
 
 /* ---------- 繪製 ---------- */
+function specKey(r){
+  const g = firmGroup(r.firm), n = r.note||'';
+  if (g==='Vest') { const m = n.match(/Account \d+ · (.+?) · 原價/); if (m) return 'Vest ' + m[1].trim(); return r.type==='payout' ? 'Vest 未對應規格' : 'Vest ' + (r.size||'未知'); }
+  if (g==='Lucid') { const m = n.match(/Lucid(Flex|Pro|Direct|Live)?\s*(\d+K)/i); if (m) return 'Lucid ' + (m[1]||'') + ' ' + m[2].toUpperCase(); if (r.type==='payout') { const a = n.match(/^L(FF|TF|PF|DF)(\d{3})/); if (a) return 'Lucid ' + ({FF:'Flex',TF:'Pro',PF:'Pro',DF:'Direct'}[a[1]]||'') + ' ' + (+a[2]) + 'K'; } return 'Lucid ' + (r.size||'').toUpperCase() + '（未標方案）'; }
+  if (g==='Tradeify') { const m = n.match(/(Select|Growth|Lightning|Advanced|Straight)[^·]*?(\d+k)/i); if (m) return 'Tradeify ' + m[1] + ' ' + m[2].toUpperCase(); return 'Tradeify ' + (r.size||'').toUpperCase(); }
+  return g + ' ' + (r.size||'');
+}
+function drawSpec(base){
+  const groups = new Map();
+  base.forEach(r => { const k = specKey(r).replace(/\s+/g,' ').trim(); const o = groups.get(k) || {n:0,cost:0,pays:0,net:0}; if (r.type==='payout'){ o.pays++; o.net+=netOf(r); } else { o.n++; o.cost+=r.amount; } groups.set(k,o); });
+  const rows = [...groups.entries()].sort((a,b)=>(b[1].cost+b[1].net)-(a[1].cost+a[1].net));
+  $('specBody').innerHTML = rows.length ? rows.map(([k,o]) => { const pl = o.net-o.cost, roi = o.cost>0 ? o.net/o.cost : null;
+    const w = roi==null ? 0 : Math.min(100, roi*100);
+    return `<tr><td>${esc(k)}</td><td class="r num">${o.n}</td><td class="r num neg">${o.cost?fmt(o.cost):'—'}</td><td class="r num">${o.n?fmt(o.cost/o.n):'—'}</td><td class="r num">${o.pays}</td><td class="r num pos">${o.net?fmt(o.net):'—'}</td><td class="r num ${pl>=0?'pos':'neg'}">${fmt(pl,true)}</td><td>${roi==null?'—':`<div style="display:flex;gap:8px;align-items:center"><div class="bar"><i class="${roi<1?'neg':''}" style="width:${w}%"></i></div><span class="num">${(roi*100).toFixed(0)}%</span></div>`}</td></tr>`; }).join('')
+    : '<tr><td colspan="8" class="empty-state">這段期間沒有資料</td></tr>';
+}
+
 function render(){
   drawFirmTabs();
   const base = inPeriod();
@@ -596,7 +634,7 @@ function render(){
   if (cur!=='all' && !firms.includes(cur)) st.fFirm='all';
   $('firmList').innerHTML = firms.map(f=>`<option value="${esc(f)}">`).join('');
 
-  drawChart(base); drawCal(); drawTable(base);
+  drawChart(base); drawCal(); drawTable(base); drawSpec(base);
 }
 
 function niceStep(range){ const raw = range/4; const p = Math.pow(10, Math.floor(Math.log10(raw||1))); const n = raw/p; return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p; }
@@ -623,7 +661,7 @@ function drawChart(base){
   let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="每月出金與成本">`;
   for (let v = yMin; v <= yMax+1e-6; v += step) {
     s += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="${v===0?'#566477':'#253041'}" stroke-dasharray="${v===0?'':'3 4'}"/>`;
-    s += `<text x="${L-8}" y="${y(v)+4}" text-anchor="end" fill="#c3cdd9" font-size="12" font-family="JetBrains Mono,monospace">${v<0?'-':''}$${Math.abs(v).toLocaleString('en-US')}</text>`;
+    s += `<text x="${L-8}" y="${y(v)+4}" text-anchor="end" fill="#c3cdd9" font-size="12" font-family="JetBrains Mono,monospace">${v<0?'-':''}${sym()}${Math.round(Math.abs(cv(v))).toLocaleString('en-US')}</text>`;
   }
   let lastYear = null;
   keys.forEach((k,i) => {
@@ -681,6 +719,10 @@ function drawTable(base){
 
 /* ---------- 互動 ---------- */
 const toast = t => { const e=$('toast'); e.textContent=t; e.hidden=false; clearTimeout(toast._t); toast._t=setTimeout(()=>e.hidden=true,2200); };
+const syncCurUI = () => { document.querySelectorAll('#curSeg button').forEach(b=>b.classList.toggle('on', b.dataset.c===CUR.code)); $('rateWrap').hidden = CUR.code!=='TWD'; $('rateInp').value = CUR.rate; };
+syncCurUI();
+$('curSeg').addEventListener('click', e => { const b=e.target.closest('button'); if(!b) return; CUR.code=b.dataset.c; try{localStorage.setItem('pc-cur',CUR.code)}catch(e){} syncCurUI(); render(); });
+$('rateInp').addEventListener('change', e => { const v=+e.target.value; if (v>0) { CUR.rate=v; try{localStorage.setItem('pc-rate',v)}catch(e){} render(); } });
 $('firmTabs').addEventListener('click', e => { const b=e.target.closest('button'); if(!b) return; st.firmTab=b.dataset.f; st.fFirm='all'; st.page=1; try{localStorage.setItem('pc-firmTab',st.firmTab)}catch(e){} render(); });
 $('periods').addEventListener('click', e => { const b = e.target.closest('.chip'); if(!b) return;
   document.querySelectorAll('#periods .chip').forEach(c=>c.classList.toggle('on', c===b));
