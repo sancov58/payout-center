@@ -168,6 +168,7 @@ textarea.inp{width:100%;min-height:90px;resize:vertical;font-family:var(--f-num)
 .login h2{margin:0;font-size:24px}
 .login p{margin:0;color:var(--muted);font-size:14px}
 .login .err{color:var(--red);font-size:13.5px;white-space:pre-line}
+.foot{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:16px;margin-top:8px}
 .userbox{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:13px;flex-wrap:wrap}
 </style>
 </head>
@@ -205,7 +206,7 @@ textarea.inp{width:100%;min-height:90px;resize:vertical;font-family:var(--f-num)
         <input type="date" id="cFrom"> 至 <input type="date" id="cTo">
       </span>
     </div>
-    <span class="userbox"><span class="status" id="status">載入中…</span><span id="userName"></span><button class="btn" id="btnGmail" title="讀取 Gmail 裡的 Vest 收據與出金通知">⟳ 從 Gmail 同步 Vest</button><button class="btn ghost" id="btnExport">匯出備份</button><button class="btn ghost" id="btnLogout">登出</button></span>
+    <span class="status" id="status">載入中…</span>
   </div>
 
   <div class="kpis">
@@ -253,10 +254,15 @@ textarea.inp{width:100%;min-height:90px;resize:vertical;font-family:var(--f-num)
   <div class="pager">
     <span id="pgInfo">—</span>
     <div class="r">每頁顯示
-      <select id="pgSize"><option>20</option><option>50</option><option>100</option></select>
+      <select id="pgSize"><option>5</option><option>10</option><option>20</option><option>50</option><option>100</option></select>
       <button class="btn ghost" id="pgPrev">‹ 上一頁</button><span id="pgNum">1 / 1</span><button class="btn ghost" id="pgNext">下一頁 ›</button>
     </div>
   </div>
+
+  <footer class="foot">
+    <div class="actions"><button class="btn" id="btnGmail" title="讀取 Gmail 裡的 Vest 收據與出金通知">⟳ 從 Gmail 同步 Vest</button><button class="btn ghost" id="btnExport">匯出備份</button><button class="btn ghost" id="btnLogout">登出</button></div>
+    <span class="userbox" id="userName"></span>
+  </footer>
 </div>
 
 <!-- 匯入 -->
@@ -540,7 +546,7 @@ function initStore(){
 }
 
 /* ---------- 篩選與計算 ---------- */
-const st = { firmTab:(()=>{try{return localStorage.getItem('pc-firmTab')||'all'}catch(e){return 'all'}})(), period:'all', from:'', to:'', chartMode:'month', fType:'all', fFirm:'all', page:1, size:20, calY:null, calM:null };
+const st = { firmTab:(()=>{try{return localStorage.getItem('pc-firmTab')||'all'}catch(e){return 'all'}})(), period:'all', from:'', to:'', chartMode:'month', fType:'all', fFirm:'all', page:1, size:(()=>{try{return +localStorage.getItem('pc-size')||5}catch(e){return 5}})(), calY:null, calM:null };
 const netOf = r => r.type==='payout' ? r.amount*((r.split==null?100:r.split)/100) : 0;
 function periodRange(){
   const t = new Date(); const T = todayISO();
@@ -553,13 +559,16 @@ function periodRange(){
   }
 }
 const firmGroup = f => /lucid/i.test(f) ? 'Lucid' : /tradeify/i.test(f) ? 'Tradeify' : /vest/i.test(f) ? 'Vest' : f;
-const inTab = r => st.firmTab==='all' || firmGroup(r.firm)===st.firmTab;
+const PF_GROUPS = ['Lucid','Tradeify'];
+const inTab = r => { const g = firmGroup(r.firm); return st.firmTab==='all' || (st.firmTab==='PF' ? PF_GROUPS.includes(g) : g===st.firmTab); };
 function inPeriod(){ const [a,b] = periodRange(); return [...recs.values()].filter(r => r.date>=a && r.date<=b && inTab(r)); }
 function drawFirmTabs(){
   const counts = {}; [...recs.values()].forEach(r => { const g=firmGroup(r.firm); counts[g]=(counts[g]||0)+1; });
-  const order = ['Lucid','Tradeify','Vest']; order.forEach(g=>counts[g]=counts[g]||0); const gs = Object.keys(counts).sort((a,b)=>(order.indexOf(a)+1||99)-(order.indexOf(b)+1||99));
-  if (st.firmTab!=='all' && !(st.firmTab in counts)) st.firmTab='all';
-  const tabs = [['all','全部合併',recs.size], ...gs.map(g=>[g,g,counts[g]])];
+  const order = ['Vest','Lucid','Tradeify']; order.forEach(g=>counts[g]=counts[g]||0);
+  const others = Object.keys(counts).filter(g=>!order.includes(g)).sort();
+  const pfCount = PF_GROUPS.reduce((n,g)=>n+(counts[g]||0),0);
+  const tabs = [['Vest','Vest',counts.Vest], ['PF','PF（Lucid＋TDY）',pfCount], ['Lucid','Lucid',counts.Lucid], ['Tradeify','Tradeify',counts.Tradeify], ...others.map(g=>[g,g,counts[g]]), ['all','全部合併',recs.size]];
+  if (!tabs.some(t=>t[0]===st.firmTab)) st.firmTab='all';
   $('firmTabs').innerHTML = tabs.map(([k,l,c])=>`<button role="tab" data-f="${esc(k)}" class="${st.firmTab===k?'on':''}" aria-selected="${st.firmTab===k}">${esc(l)}<span class="cnt">${c}</span></button>`).join('');
 }
 
@@ -684,7 +693,8 @@ $('calPrev').onclick = () => { st.calM--; if(st.calM<1){st.calM=12;st.calY--;} d
 $('calNext').onclick = () => { st.calM++; if(st.calM>12){st.calM=1;st.calY++;} drawCal(); };
 $('fType').onchange = e => { st.fType=e.target.value; st.page=1; render(); };
 $('fFirm').onchange = e => { st.fFirm=e.target.value; st.page=1; render(); };
-$('pgSize').onchange = e => { st.size=+e.target.value; st.page=1; render(); };
+$('pgSize').value = String(st.size);
+$('pgSize').onchange = e => { st.size=+e.target.value; st.page=1; try{localStorage.setItem('pc-size',st.size)}catch(e){} render(); };
 $('pgPrev').onclick = () => { st.page--; render(); };
 $('pgNext').onclick = () => { st.page++; render(); };
 let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt=setTimeout(()=>drawChart(inPeriod()),120); });
