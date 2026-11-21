@@ -155,7 +155,7 @@ function syncVest() {
         const rc = ((r.note || '').match(/VST-\d+-\d+/) || [])[0], rr = rc && byRc[rc];
         if (!rr) return;
         if (!r.time) upd.time = tm_(rr.date);
-        if (/· ·/.test(r.note || '')) upd.note = r.note.replace(/· [^·]*目標 · · [^·]* ·/, '· ' + spec_(rr.prod).spec + ' ·');
+        if (/·\s+·/.test(r.note || '')) upd.note = r.note.replace(/· [^·]*目標 ·\s+· [^·]* ·/, '· ' + spec_(rr.prod).spec + ' ·');
       } else if (r.type === 'payout' && !r.time) {
         const net = r.amount * (r.split == null ? 100 : r.split) / 100;
         const p = payouts.find(p => ('vest-pay-mail-' + p.id) === r.id) || payouts.find(p => tw_(p.date) === r.date && Math.abs(p.amt - net) < 0.05);
