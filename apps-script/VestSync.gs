@@ -51,20 +51,30 @@ function writeRecord_(r) {
   ['date', 'firm', 'size', 'type', 'cat', 'note'].forEach(k => f[k] = { stringValue: String(r[k] || '') });
   f.amount = { doubleValue: +r.amount };
   f.split = r.split == null ? { nullValue: null } : { doubleValue: +r.split };
+  f.time = { stringValue: String(r.time || '') };
   api_('patch', BASE + '/' + encodeURIComponent(r.id), { fields: f });
+}
+
+// 只更新部分欄位（補時間、修正備註）
+function patchFields_(id, obj) {
+  const f = {}, mask = Object.keys(obj).map(k => { f[k] = { stringValue: String(obj[k]) }; return 'updateMask.fieldPaths=' + k; }).join('&');
+  api_('patch', BASE + '/' + encodeURIComponent(id) + '?' + mask, { fields: f });
 }
 
 function spec_(prod) {
   if (/Instant/i.test(prod)) return { size: '500 Instant', spec: 'Instant 500' };
   const parts = prod.split('|').map(x => x.trim());
   const goal = (parts.find(x => /Goal/i.test(x)) || '').replace(/\s*Goal/i, '');
-  const dlRaw = parts.find(x => /Daily Loss/i.test(x)) || '';
-  const dl = /No Daily/i.test(dlRaw) ? '無日損' : dlRaw.replace(/\s*Daily Loss/i, '日損');
+  const dlRaw = parts.find(x => /Daily Loss|\bDLL\b/i.test(x)) || '';
+  const dl = /^No /i.test(dlRaw) ? '無日損' : dlRaw.replace(/\s*(Daily Loss( Limit)?|DLL)/i, '日損');
+  const ddRaw = parts.find(x => /Drawdown/i.test(x)) || '';
+  const dd = ddRaw ? ddRaw.replace(/\s*Drawdown/i, '回撤') : '';
   const sp = parts.find(x => /^\d+\/\d+$/.test(x)) || '';
-  return { size: '5K', spec: 'Eval ' + goal + '目標 · ' + dl + ' · ' + sp };
+  return { size: '5K', spec: ['Eval ' + goal + '目標', dl, dd, sp].filter(Boolean).join(' · ') };
 }
 
 const tw_ = d => Utilities.formatDate(d, 'Asia/Taipei', 'yyyy-MM-dd');
+const tm_ = d => Utilities.formatDate(d, 'Asia/Taipei', 'HH:mm');
 const num_ = s => +String(s || '0').replace(/,/g, '');
 
 function syncVest() {
@@ -110,7 +120,7 @@ function syncVest() {
       const lp = legacy[legacyId] && +(((legacy[legacyId].note || '').match(/原價 \$([\d.]+)/) || [])[1] || 0);
       if (r.qty === 1 && legacy[legacyId] && lp === r.price) {
         const sp0 = spec_(r.prod), nn0 = String(firstSeq).padStart(2, '0');
-        writeRecord_({ id: legacyId, date: tw_(r.date), firm: 'Vest Markets', size: sp0.size, type: 'cost', cat: '購買帳號',
+        writeRecord_({ id: legacyId, date: tw_(r.date), time: tm_(r.date), firm: 'Vest Markets', size: sp0.size, type: 'cost', cat: '購買帳號',
           amount: r.paid, split: null, note: 'Account ' + nn0 + ' · ' + sp0.spec + ' · 原價 $' + r.price + ' · 收據 ' + r.rc });
         known.add(r.rc); delete legacy[legacyId]; return;
       }
@@ -118,7 +128,7 @@ function syncVest() {
       for (let k = 0; k < r.qty; k++) {
         maxAcc++; const nn = String(maxAcc).padStart(2, '0');
         notify_('🧾 Vest 購買帳號 Account ' + nn + '\n' + sp.spec + '\n成本 $' + unit + '（' + tw_(r.date) + '）');
-        writeRecord_({ id: 'vest-acc-' + nn, date: tw_(r.date), firm: 'Vest Markets', size: sp.size, type: 'cost', cat: '購買帳號',
+        writeRecord_({ id: 'vest-acc-' + nn, date: tw_(r.date), time: tm_(r.date), firm: 'Vest Markets', size: sp.size, type: 'cost', cat: '購買帳號',
           amount: unit, split: null, note: 'Account ' + nn + ' · ' + sp.spec + ' · 原價 $' + r.price + ' · 收據 ' + r.rc });
         added++;
       }
@@ -129,12 +139,32 @@ function syncVest() {
       const id = 'vest-pay-mail-' + p.id, d = tw_(p.date);
       if (ids.has(id)) return;
       if (pays.some(e => e.date === d && Math.abs(e.amount * (e.split == null ? 100 : e.split) / 100 - p.amt) < 0.05)) return;
-      writeRecord_({ id: id, date: d, firm: 'Vest Markets', size: '', type: 'payout', cat: '出金', amount: p.amt, split: 100, note: 'Gmail 出金通知 · 實收 ' + p.amt + ' USDC' });
+      writeRecord_({ id: id, date: d, time: tm_(p.date), firm: 'Vest Markets', size: '', type: 'payout', cat: '出金', amount: p.amt, split: 100, note: 'Gmail 出金通知 · 實收 ' + p.amt + ' USDC' });
       pays.push({ date: d, amount: p.amt, split: 100 }); added++;
       notify_('💰 Vest 出金到帳 $' + p.amt + ' USDC（' + d + '）');
     });
 
     if (added) console.log('Vest 同步：新增 ' + added + ' 筆');
+
+    // 補時間、修正規格文字（既有資料）
+    const byRc = {}; receipts.forEach(r => byRc[r.rc] = r);
+    let fixed = 0;
+    recs.forEach(r => {
+      const upd = {};
+      if (r.type === 'cost') {
+        const rc = ((r.note || '').match(/VST-\d+-\d+/) || [])[0], rr = rc && byRc[rc];
+        if (!rr) return;
+        if (!r.time) upd.time = tm_(rr.date);
+        if (/· ·/.test(r.note || '')) upd.note = r.note.replace(/· [^·]*目標 · · [^·]* ·/, '· ' + spec_(rr.prod).spec + ' ·');
+      } else if (r.type === 'payout' && !r.time) {
+        const net = r.amount * (r.split == null ? 100 : r.split) / 100;
+        const p = payouts.find(p => ('vest-pay-mail-' + p.id) === r.id) || payouts.find(p => tw_(p.date) === r.date && Math.abs(p.amt - net) < 0.05);
+        if (p) upd.time = tm_(p.date);
+      }
+      if (Object.keys(upd).length) { patchFields_(r.id, upd); fixed++; }
+    });
+    if (fixed) console.log('Vest 補資料：' + fixed + ' 筆');
+
     syncLucidTdy_(allRecs);
   } finally { lock.releaseLock(); }
 }
@@ -144,6 +174,7 @@ function syncVest() {
 function syncLucidTdy_(allRecs) {
   const ids = new Set(allRecs.map(r => r.id));
   const pays = allRecs.filter(r => r.type === 'payout' && /lucid/i.test(r.firm || ''));
+  const noTime = new Set(allRecs.filter(r => !r.time).map(r => r.id));
   const dayDiff = (a, b) => Math.abs((new Date(a) - new Date(b)) / 864e5);
   let added = 0;
 
@@ -154,10 +185,10 @@ function syncLucidTdy_(allRecs) {
     const total = num_((t.match(/Total:\s*\|?\s*\$([\d.,]+)/) || [])[1]);
     if (!ord || !(total > 0)) return;
     const id = 'lucid-o-' + ord;
-    if (ids.has(id)) return;
+    if (ids.has(id)) { if (noTime.has(id)) { patchFields_(id, { time: tm_(m.getDate()) }); noTime.delete(id); } return; }
     const prod = ((t.match(/\|\s*(Lucid[A-Za-z]*\s+\d+K[^|]*)\|/) || [])[1] || '').trim();
     const size = ((prod.match(/(\d+)K/i) || [])[1] || '') ;
-    writeRecord_({ id: id, date: tw_(m.getDate()), firm: 'Lucid Trading', size: size ? size + 'k' : '', type: 'cost', cat: '購買帳號', amount: total, split: null, note: '#' + ord + ' · ' + prod });
+    writeRecord_({ id: id, date: tw_(m.getDate()), time: tm_(m.getDate()), firm: 'Lucid Trading', size: size ? size + 'k' : '', type: 'cost', cat: '購買帳號', amount: total, split: null, note: '#' + ord + ' · ' + prod });
     ids.add(id); added++;
     notify_('🧾 Lucid 購買 ' + prod + '\n成本 $' + total + '（' + tw_(m.getDate()) + '）');
   }));
@@ -167,10 +198,11 @@ function syncLucidTdy_(allRecs) {
     const net = num_((m.getPlainBody().match(/Payment Amount\s*\$([\d.,]+)/) || [])[1]);
     if (!(net > 0)) return;
     const id = 'lucid-pay-mail-' + m.getId(), d = tw_(m.getDate());
-    if (ids.has(id)) return;
-    if (pays.some(e => dayDiff(e.date, d) <= 2 && Math.abs(e.amount * (e.split == null ? 100 : e.split) / 100 - net) < 0.05)) return;
+    if (ids.has(id)) { if (noTime.has(id)) { patchFields_(id, { time: tm_(m.getDate()) }); noTime.delete(id); } return; }
+    const same = pays.find(e => dayDiff(e.date, d) <= 2 && Math.abs(e.amount * (e.split == null ? 100 : e.split) / 100 - net) < 0.05);
+    if (same) { if (same.id && same.date === d && noTime.has(same.id)) { patchFields_(same.id, { time: tm_(m.getDate()) }); noTime.delete(same.id); } return; }
     const gross = Math.round(net / 0.9 * 100) / 100;
-    writeRecord_({ id: id, date: d, firm: 'Lucid Trading', size: '', type: 'payout', cat: '出金', amount: gross, split: 90, note: 'Gmail 出金通知 · 實收 $' + net });
+    writeRecord_({ id: id, date: d, time: tm_(m.getDate()), firm: 'Lucid Trading', size: '', type: 'payout', cat: '出金', amount: gross, split: 90, note: 'Gmail 出金通知 · 實收 $' + net });
     pays.push({ date: d, amount: gross, split: 90 }); ids.add(id); added++;
     notify_('💰 Lucid 出金到帳 $' + net + '（' + d + '）');
   }));
@@ -182,10 +214,10 @@ function syncLucidTdy_(allRecs) {
     const amt = num_((t.match(/Order Amount:\s*\$?([\d.,]+)/) || [])[1]);
     if (!ord || !(amt > 0)) return;
     const id = 'tdfy-o-' + ord;
-    if (ids.has(id)) return;
+    if (ids.has(id)) { if (noTime.has(id)) { patchFields_(id, { time: tm_(m.getDate()) }); noTime.delete(id); } return; }
     const acct = (t.match(/account name is\s*([A-Z0-9]+)/) || [])[1] || '';
     const size = ((acct.match(/^[A-Z]*?(\d{2,3})\d{6,}/) || [])[1] || '');
-    writeRecord_({ id: id, date: tw_(m.getDate()), firm: 'Tradeify', size: size ? (+size) + 'k' : '', type: 'cost', cat: '購買帳號', amount: amt, split: null, note: '#' + ord + (acct ? ' · ' + acct : '') });
+    writeRecord_({ id: id, date: tw_(m.getDate()), time: tm_(m.getDate()), firm: 'Tradeify', size: size ? (+size) + 'k' : '', type: 'cost', cat: '購買帳號', amount: amt, split: null, note: '#' + ord + (acct ? ' · ' + acct : '') });
     ids.add(id); added++;
     notify_('🧾 Tradeify 購買 ' + acct + '\n成本 $' + amt);
   }));

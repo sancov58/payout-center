@@ -108,6 +108,7 @@ td.note{color:var(--muted);font-size:13.5px;white-space:normal;min-width:180px}
 tbody tr:nth-child(even) td{background:rgba(255,255,255,.015)}
 tr:hover td{background:var(--panel2)}
 .sz{display:none}
+.tm{display:block;font-size:12px;color:#97a4b4;font-weight:500;margin-top:2px}
 .icon-btn{border:1px solid transparent;background:transparent;color:var(--muted);padding:5px 8px;border-radius:6px;font-size:15px}
 .icon-btn:hover{color:var(--gold);border-color:var(--line2)}
 .pager{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:14px}
@@ -233,7 +234,7 @@ textarea.inp{width:100%;min-height:90px;resize:vertical;font-family:var(--f-num)
   <div class="grid2">
     <div class="panel">
       <div class="ph"><h2>績效表現</h2>
-        <div class="seg" id="chartMode"><button class="on" data-m="month">月份</button><button data-m="firm">公司</button></div>
+        <div class="seg" id="chartMode"><button data-m="day">每日</button><button data-m="month">月份</button><button data-m="firm">公司</button></div>
       </div>
       <div id="chart"></div>
       <div class="legend"><span><i style="background:var(--gold)"></i>實際到手</span><span><i style="background:var(--gold-dim)"></i>分成差額</span><span><i style="background:var(--red)"></i>成本</span></div>
@@ -315,6 +316,7 @@ textarea.inp{width:100%;min-height:90px;resize:vertical;font-family:var(--f-num)
     <h3 id="edTitle">新增出金</h3>
     <div class="form">
       <label>日期<input class="inp" type="date" id="eDate"></label>
+      <label>時間<input class="inp" type="time" id="eTime"></label>
       <label>類型<select id="eType"><option value="payout">出金</option><option value="購買帳號">購買帳號</option><option value="其他成本">其他成本</option></select></label>
       <label>Prop Firm 名稱<input class="inp" id="eFirm" list="firmList" placeholder="Lucid Trading"></label>
       <label>帳號類型<input class="inp" id="eSize" placeholder="50k"></label>
@@ -375,6 +377,14 @@ function toISO(v){
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if (m) return ymd(+m[3],+m[1],+m[2]);
   return null;
 }
+function toTime(v){
+  if (v==null || v==='') return '';
+  if (typeof v === 'number') { const f = v - Math.floor(v); if (!f) return ''; const mins = Math.round(f*1440); return pad(Math.floor(mins/60)%24)+':'+pad(mins%60); }
+  if (v instanceof Date) return pad(v.getHours())+':'+pad(v.getMinutes());
+  const m = String(v).match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?/i); if (!m) return '';
+  let h = +m[1]; if (m[3]) { const pm = /pm/i.test(m[3]); if (pm && h<12) h+=12; if (!pm && h===12) h=0; }
+  return pad(h)+':'+m[2];
+}
 const num = v => typeof v==='number' ? v : (parseFloat(String(v??'').replace(/[^0-9.\-]/g,'')) || 0);
 const norm = s => String(s??'').trim().toLowerCase().replace(/\s+/g,' ');
 const sizeFrom = s => { const m = String(s??'').match(/(\d{2,3})\s*k\b/i); return m ? (+m[1])+'k' : ''; };
@@ -414,7 +424,7 @@ function parseAoa(aoa, forced, defSplit){
       const st = norm(g('Status')), amt = num(g('Total')), date = toISO(g('Date')), ord = String(g('Order #')||'').replace(/[^0-9A-Za-z]/g,'');
       if (ord && st && st!=='completed') { failed.push('#'+ord+' '+st.toUpperCase()); continue; }
       if (!date || !ord || amt<=0) { skipped++; continue; }
-      rec = {id:'lucid-o-'+ord, date, firm:'Lucid Trading', size:sizeFrom(g('Products')), type:'cost', cat:'購買帳號', amount:amt, split:null, note:`#${ord} · ${g('Products')||''}`};
+      rec = {id:'lucid-o-'+ord, date, time:toTime(g('Date')), firm:'Lucid Trading', size:sizeFrom(g('Products')), type:'cost', cat:'購買帳號', amount:amt, split:null, note:`#${ord} · ${g('Products')||''}`};
     } else if (kind==='lucidPayouts') {
       const st = norm(g('Status')), amt = num(g('Amount')), date = toISO(g('Approval Date')) || toISO(g('Request Date')), acct = String(g('Account ID')||'');
       if (st && !/paid|approved|complete/.test(st)) { failed.push(`${acct} ${fmt(amt)} ${st.toUpperCase()}`); continue; }
@@ -425,7 +435,7 @@ function parseAoa(aoa, forced, defSplit){
       if (ord && (st==='failed' || ps==='failed')) { failed.push('#'+ord+' FAILED'); continue; }
       if (!date || !ord || amt<=0) { skipped++; continue; }
       const acct = g('Trading Account');
-      rec = {id:'tdfy-o-'+ord, date, firm:'Tradeify', size:sizeFrom(g('Plan')), type:'cost', cat:'購買帳號', amount:amt, split:null, note:`#${ord} · ${g('Plan')||''}${acct && acct!=='---' ? ' · '+acct : ''}`};
+      rec = {id:'tdfy-o-'+ord, date, time:toTime(g('Date')), firm:'Tradeify', size:sizeFrom(g('Plan')), type:'cost', cat:'購買帳號', amount:amt, split:null, note:`#${ord} · ${g('Plan')||''}${acct && acct!=='---' ? ' · '+acct : ''}`};
     } else if (kind==='records') {
       const date = toISO(g('日期')), amt = num(g('金額')), firm = String(g('Prop Firm 名稱')||'').trim() || '未指定', t = String(g('類型')||'').trim();
       if (!date || amt<=0) { skipped++; continue; }
@@ -450,7 +460,7 @@ let uid = null, unsub = null;
 const col = () => collection(fdb, 'payoutCenter', uid, 'records');
 async function put(rec){
   if (!uid) throw new Error('尚未登入');
-  const clean = {date:rec.date, firm:rec.firm, size:rec.size||'', type:rec.type, cat:rec.cat||'', amount:+rec.amount, split:rec.split==null?null:+rec.split, note:rec.note||''};
+  const clean = {date:rec.date, firm:rec.firm, size:rec.size||'', type:rec.type, cat:rec.cat||'', amount:+rec.amount, split:rec.split==null?null:+rec.split, note:rec.note||'', time:rec.time||''};
   await setDoc(doc(col(), rec.id), clean); recs.set(rec.id,{id:rec.id,...clean});
 }
 async function del(id){ if (!uid) throw new Error('尚未登入'); await deleteDoc(doc(col(), id)); recs.delete(id); }
@@ -466,6 +476,7 @@ function showLoginErr(e){ const el=$('loginErr'); el.hidden=false; el.textConten
 /* ---------- Gmail 同步 Vest ---------- */
 const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const MON = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+const twTime = ms => { const d = new Date(ms + 8*3600e3); return pad(d.getUTCHours())+':'+pad(d.getUTCMinutes()); };
 const twDate = ms => { const d = new Date(ms + 8*3600e3); return ymd(d.getUTCFullYear(), d.getUTCMonth()+1, d.getUTCDate()); };
 function b64(data){ const bin = atob(data.replace(/-/g,'+').replace(/_/g,'/')); return new TextDecoder().decode(Uint8Array.from(bin, c=>c.charCodeAt(0))); }
 function bodyText(part){
@@ -479,10 +490,12 @@ function specOf(prod){
   if (/Instant/i.test(prod)) return {size:'500 Instant', spec:'Instant 500'};
   const parts = prod.split('|').map(x=>x.trim());
   const goal = (parts.find(x=>/Goal/i.test(x))||'').replace(/\s*Goal/i,'');
-  const dlRaw = parts.find(x=>/Daily Loss/i.test(x))||'';
-  const dl = /No Daily/i.test(dlRaw) ? '無日損' : dlRaw.replace(/\s*Daily Loss/i,'日損');
+  const dlRaw = parts.find(x=>/Daily Loss|\bDLL\b/i.test(x))||'';
+  const dl = /^No /i.test(dlRaw) ? '無日損' : dlRaw.replace(/\s*(Daily Loss( Limit)?|DLL)/i,'日損');
+  const ddRaw = parts.find(x=>/Drawdown/i.test(x))||'';
+  const dd = ddRaw ? ddRaw.replace(/\s*Drawdown/i,'回撤') : '';
   const sp = parts.find(x=>/^\d+\/\d+$/.test(x))||'';
-  return {size:'5K', spec:`Eval ${goal}目標 · ${dl} · ${sp}`};
+  return {size:'5K', spec:['Eval '+goal+'目標', dl, dd, sp].filter(Boolean).join(' · ')};
 }
 async function gmailToken(){
   const prov = new GoogleAuthProvider(); prov.addScope(GMAIL_SCOPE); prov.setCustomParameters({login_hint: auth.currentUser?.email||''});
@@ -527,12 +540,12 @@ async function syncVestFromGmail(){
     let n = 0; vrecs.forEach(r => { const m = /^vest-acc-(\d+)/.exec(r.id); if (m) n = Math.max(n, +m[1]); });
     const out = [];
     for (const r of receipts) { if (known.has(r.rc)) continue; known.add(r.rc); for (let k=0;k<r.qty;k++) { n++; const sp = specOf(r.prod);
-      out.push({id:'vest-acc-'+String(n).padStart(2,'0'), date:twDate(r.ms), firm:'Vest Markets', size:sp.size, type:'cost', cat:'購買帳號', amount:r.unit, split:null, note:`Account ${String(n).padStart(2,'0')} · ${sp.spec} · 原價 $${r.price} · 收據 ${r.rc}`}); } }
+      out.push({id:'vest-acc-'+String(n).padStart(2,'0'), date:twDate(r.ms), time:twTime(r.ms), firm:'Vest Markets', size:sp.size, type:'cost', cat:'購買帳號', amount:r.unit, split:null, note:`Account ${String(n).padStart(2,'0')} · ${sp.spec} · 原價 $${r.price} · 收據 ${r.rc}`}); } }
     const existingPays = [...recs.values()].filter(r => firmGroup(r.firm)==='Vest' && r.type==='payout');
     for (const p of payouts) { const d = twDate(p.ms);
       if (recs.has('vest-pay-mail-'+p.id)) continue;
       if (existingPays.some(e => e.date===d && Math.abs(netOf(e)-p.amt) < 0.05)) continue;
-      out.push({id:'vest-pay-mail-'+p.id, date:d, firm:'Vest Markets', size:'', type:'payout', cat:'出金', amount:p.amt, split:100, note:`Gmail 出金通知 · 實收 ${p.amt} USDC`}); }
+      out.push({id:'vest-pay-mail-'+p.id, date:d, time:twTime(p.ms), firm:'Vest Markets', size:'', type:'payout', cat:'出金', amount:p.amt, split:100, note:`Gmail 出金通知 · 實收 ${p.amt} USDC`}); }
     log.innerHTML=''; $('importModal').hidden=false;
     logLine(`Gmail：找到 ${receipts.length} 封收據、${payouts.length} 封出金通知`);
     await saveParsed('Gmail 同步 Vest', {recs:out, kinds:{backup:out.length}, skipped:0, failed:[], dupInFile:0});
@@ -567,7 +580,7 @@ function initStore(){
 }
 
 /* ---------- 篩選與計算 ---------- */
-const st = { firmTab:(()=>{try{return localStorage.getItem('pc-firmTab')||'all'}catch(e){return 'all'}})(), period:'all', from:'', to:'', chartMode:'month', fType:'all', fFirm:'all', page:1, size:(()=>{try{return +localStorage.getItem('pc-size')||5}catch(e){return 5}})(), calY:null, calM:null };
+const st = { firmTab:(()=>{try{return localStorage.getItem('pc-firmTab')||'all'}catch(e){return 'all'}})(), period:'all', from:'', to:'', chartMode:(()=>{try{return localStorage.getItem('pc-chart')||'day'}catch(e){return 'day'}})(), fType:'all', fFirm:'all', page:1, size:(()=>{try{return +localStorage.getItem('pc-size')||5}catch(e){return 5}})(), calY:null, calM:null };
 const netOf = r => r.type==='payout' ? r.amount*((r.split==null?100:r.split)/100) : 0;
 function periodRange(){
   const t = new Date(); const T = todayISO();
@@ -646,7 +659,16 @@ function drawChart(base){
     if (ds.length) { let [y,m] = ds[0].split('-').map(Number); const [ey,em] = ds[ds.length-1].split('-').map(Number);
       while (y<ey || (y===ey && m<=em)) { groups.set(`${y}-${pad(m)}`, {g:0,n:0,c:0}); m++; if (m>12){m=1;y++;} } }
   }
-  base.forEach(r => { const k = st.chartMode==='month' ? r.date.slice(0,7) : r.firm; if(!groups.has(k)) groups.set(k,{g:0,n:0,c:0}); const o = groups.get(k);
+  if (st.chartMode==='day') {
+    // 每日：顯示期間內的每一天（全部/YTD 等長期間只顯示最近 31 天）
+    const [pa,pb] = periodRange(); const T = todayISO();
+    let end = pb>T ? T : pb; const ds = base.map(r=>r.date).sort(); if (ds.length && ds[ds.length-1]>end) end = ds[ds.length-1];
+    const e = new Date(end+'T00:00:00'); const s0 = new Date(e); s0.setDate(s0.getDate()-30);
+    let sISO = ymd(s0.getFullYear(), s0.getMonth()+1, s0.getDate()); if (pa>sISO) sISO = pa;
+    for (let d = new Date(sISO+'T00:00:00'); d<=e; d.setDate(d.getDate()+1)) groups.set(ymd(d.getFullYear(), d.getMonth()+1, d.getDate()), {g:0,n:0,c:0});
+    base = base.filter(r => groups.has(r.date));
+  }
+  base.forEach(r => { const k = st.chartMode==='day' ? r.date : st.chartMode==='month' ? r.date.slice(0,7) : r.firm; if(!groups.has(k)) groups.set(k,{g:0,n:0,c:0}); const o = groups.get(k);
     if (r.type==='payout'){ o.g+=r.amount; o.n+=netOf(r); } else o.c+=r.amount; });
   const keys = [...groups.keys()];
   if (!keys.length) { el.innerHTML = '<div class="empty-state">這段期間沒有資料</div>'; return; }
@@ -656,9 +678,9 @@ function drawChart(base){
   const L=66, R=12, T=26, B=50, pw=W-L-R, ph=H-T-B;
   const y = v => T + (yMax - v)/(yMax - yMin)*ph;
   const bw = Math.min(46, pw/keys.length*0.42);
-  const narrow = pw/keys.length < 90;
+  const narrow = pw/keys.length < 90, tiny = pw/keys.length < 34;
   const lbl = v => narrow ? fmtK(v).replace('+','') : fmt(Math.abs(v));
-  let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="每月出金與成本">`;
+  let s = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="出金與成本">`;
   for (let v = yMin; v <= yMax+1e-6; v += step) {
     s += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="${v===0?'#566477':'#253041'}" stroke-dasharray="${v===0?'':'3 4'}"/>`;
     s += `<text x="${L-8}" y="${y(v)+4}" text-anchor="end" fill="#c3cdd9" font-size="12" font-family="JetBrains Mono,monospace">${v<0?'-':''}${sym()}${Math.round(Math.abs(cv(v))).toLocaleString('en-US')}</text>`;
@@ -669,14 +691,16 @@ function drawChart(base){
     if (o.g>0) {
       s += `<rect x="${x}" y="${y(o.n)}" width="${bw}" height="${y(0)-y(o.n)}" fill="#f5b83d" rx="2"><title>${k} 實際到手 ${fmt(o.n)}</title></rect>`;
       if (o.g-o.n>0.005) s += `<rect x="${x}" y="${y(o.g)}" width="${bw}" height="${y(o.n)-y(o.g)}" fill="#8a6a26"><title>分成差額 ${fmt(o.g-o.n)}</title></rect>`;
-      s += `<text x="${cx}" y="${y(o.g)-7}" text-anchor="middle" fill="#f5b83d" font-size="12" font-weight="600" font-family="JetBrains Mono,monospace">+${lbl(o.n)}</text>`;
+      if (!tiny) s += `<text x="${cx}" y="${y(o.g)-7}" text-anchor="middle" fill="#f5b83d" font-size="12" font-weight="600" font-family="JetBrains Mono,monospace">+${lbl(o.n)}</text>`;
     }
     if (o.c>0) {
       s += `<rect x="${x}" y="${y(0)}" width="${bw}" height="${y(-o.c)-y(0)}" fill="#ff7b72" opacity=".9" rx="2"><title>${k} 成本 ${fmt(o.c)}</title></rect>`;
-      s += `<text x="${cx}" y="${y(-o.c)+16}" text-anchor="middle" fill="#ff7b72" font-size="12" font-weight="600" font-family="JetBrains Mono,monospace">-${lbl(o.c)}</text>`;
+      if (!tiny) s += `<text x="${cx}" y="${y(-o.c)+16}" text-anchor="middle" fill="#ff7b72" font-size="12" font-weight="600" font-family="JetBrains Mono,monospace">-${lbl(o.c)}</text>`;
     }
     let lab = k, yr = '';
     if (st.chartMode==='month') { const [yy,mm] = k.split('-'); lab = (+mm)+'月'; if (yy!==lastYear) { yr = yy+'年'; lastYear = yy; } }
+    if (st.chartMode==='day') { const [,mm,dd] = k.split('-'); const every = Math.ceil(keys.length*30/pw);
+      lab = (keys.length-1-i) % every ? '' : String(+dd); if (mm!==lastYear) { yr = (+mm)+'月'; lastYear = mm; } }
     s += `<text x="${cx}" y="${H-B+20}" text-anchor="middle" fill="#f3f6fa" font-size="13" font-weight="600">${esc(lab)}</text>`;
     if (yr) s += `<text x="${cx}" y="${H-B+38}" text-anchor="middle" fill="#97a4b4" font-size="12">${yr}</text>`;
   });
@@ -701,13 +725,13 @@ function drawCal(){
 
 function drawTable(base){
   let rows = base.filter(r => (st.fType==='all' || r.type===st.fType) && (st.fFirm==='all' || r.firm===st.fFirm));
-  rows.sort((a,b) => b.date.localeCompare(a.date) || (a.type===b.type?0:a.type==='payout'?-1:1) || b.id.localeCompare(a.id));
+  rows.sort((a,b) => b.date.localeCompare(a.date) || (b.time||'').localeCompare(a.time||'') || (a.type===b.type?0:a.type==='payout'?-1:1) || b.id.localeCompare(a.id));
   const pages = Math.max(1, Math.ceil(rows.length/st.size)); st.page = Math.min(st.page, pages);
   const start = (st.page-1)*st.size, view = rows.slice(start, start+st.size);
   $('tbody').innerHTML = view.map(r => {
     const pay = r.type==='payout';
     const pill = pay ? '<span class="pill p">出金</span>' : `<span class="pill ${r.cat==='購買帳號'?'c':'o'}">${esc(r.cat||'成本')}</span>`;
-    return `<tr><td class="num c-date">${r.date}</td><td class="c-firm">${esc(r.firm)}<span class="sz">${r.size?' · '+esc(r.size):''}</span></td><td class="c-size">${esc(r.size)}</td><td class="c-type">${pill}</td>
+    return `<tr><td class="num c-date">${r.date}${r.time?`<span class="tm">${r.time}</span>`:''}</td><td class="c-firm">${esc(r.firm)}<span class="sz">${r.size?' · '+esc(r.size):''}</span></td><td class="c-size">${esc(r.size)}</td><td class="c-type">${pill}</td>
       <td class="r num c-amt">${fmt(r.amount)}</td><td class="r num c-split">${pay?(r.split??100)+'%':'—'}</td><td class="r num c-net ${pay?'pos':'nil'}">${pay?'<span class="sz">到手 </span>'+fmt(netOf(r))+'<span class="sz"> ('+(r.split??100)+'%)</span>':'—'}</td>
       <td class="note">${esc(r.note)}</td><td class="r c-op"><button class="icon-btn" data-edit="${esc(r.id)}" aria-label="編輯">✎</button></td></tr>`;
   }).join('');
@@ -730,7 +754,8 @@ $('periods').addEventListener('click', e => { const b = e.target.closest('.chip'
 $('cFrom').addEventListener('change', e => { st.from=e.target.value; render(); });
 $('cTo').addEventListener('change', e => { st.to=e.target.value; render(); });
 $('chartMode').addEventListener('click', e => { const b=e.target.closest('button'); if(!b) return;
-  document.querySelectorAll('#chartMode button').forEach(c=>c.classList.toggle('on',c===b)); st.chartMode=b.dataset.m; render(); });
+  document.querySelectorAll('#chartMode button').forEach(c=>c.classList.toggle('on',c===b)); st.chartMode=b.dataset.m; try{localStorage.setItem('pc-chart',st.chartMode)}catch(e){} render(); });
+document.querySelectorAll('#chartMode button').forEach(c=>c.classList.toggle('on',c.dataset.m===st.chartMode));
 $('calPrev').onclick = () => { st.calM--; if(st.calM<1){st.calM=12;st.calY--;} drawCal(); };
 $('calNext').onclick = () => { st.calM++; if(st.calM>12){st.calM=1;st.calY++;} drawCal(); };
 $('fType').onchange = e => { st.fType=e.target.value; st.page=1; render(); };
@@ -757,7 +782,7 @@ function openEdit(rec, kind){
   editing = rec ? rec.id : null; delArmed=false; $('eDel').textContent='刪除';
   const r = rec || {date:todayISO(), firm:st.fFirm!=='all'?st.fFirm:({Lucid:'Lucid Trading',Tradeify:'Tradeify',Vest:'Vest Markets'}[st.firmTab]||'Lucid Trading'), size:st.firmTab==='Vest'?'':'50k', type:kind, cat:kind==='payout'?'出金':'購買帳號', amount:'', split:st.firmTab==='Vest'?95:(+$('defSplit').value||90), note:''};
   $('edTitle').textContent = rec ? '編輯記錄' : (kind==='payout'?'新增出金':'新增成本');
-  $('eDate').value=r.date; $('eFirm').value=r.firm; $('eSize').value=r.size||''; $('eAmt').value=r.amount; $('eNote').value=r.note||'';
+  $('eDate').value=r.date; $('eTime').value=r.time||(rec?'':new Date().toTimeString().slice(0,5)); $('eFirm').value=r.firm; $('eSize').value=r.size||''; $('eAmt').value=r.amount; $('eNote').value=r.note||'';
   $('eType').value = r.type==='payout' ? 'payout' : (r.cat==='購買帳號'?'購買帳號':'其他成本');
   $('eSplit').value = r.split ?? 90; $('eSplitWrap').hidden = $('eType').value!=='payout';
   $('eDel').hidden = !rec; $('editModal').hidden=false; $('eAmt').focus();
@@ -771,7 +796,7 @@ $('eSave').onclick = async () => {
   const t = $('eType').value, amt = parseFloat($('eAmt').value), date = $('eDate').value;
   if (!date || !(amt>0)) { toast('請填日期和大於 0 的金額'); return; }
   const rec = {id: editing || safeId('m-'+Date.now().toString(36)), date, firm:$('eFirm').value.trim()||'未指定', size:$('eSize').value.trim(),
-    type: t==='payout'?'payout':'cost', cat: t==='payout'?'出金':t, amount:amt, split: t==='payout' ? (parseFloat($('eSplit').value)||0) : null, note:$('eNote').value.trim()};
+    type: t==='payout'?'payout':'cost', cat: t==='payout'?'出金':t, amount:amt, split: t==='payout' ? (parseFloat($('eSplit').value)||0) : null, note:$('eNote').value.trim(), time:$('eTime').value||''};
   try { await put(rec); $('editModal').hidden=true; toast('已儲存'); render(); } catch(e){ toast('儲存失敗：'+(e.code||e.message)); }
 };
 $('eDel').onclick = async () => {
@@ -790,7 +815,7 @@ async function saveParsed(label, res){
   const fresh = [];
   for (const r of res.recs) {
     const old = recs.get(r.id);
-    if (old) { const same = ['date','firm','size','type','cat','amount','split','note'].every(k => String(old[k]??'')===String(r[k]??''));
+    if (old) { const same = ['date','time','firm','size','type','cat','amount','split','note'].every(k => String(old[k]??'')===String(r[k]??''));
       if (res.kinds.backup && !same) { fresh.push(r); upd++; continue; }
       dup++; continue; }   // 單號已存在 → 不重複記入，也不覆蓋你改過的內容
     fresh.push(r); added++;
